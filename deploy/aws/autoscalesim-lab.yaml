@@ -27,11 +27,39 @@ Parameters:
     Type: String
     Default: 0.0.0.0/0
     Description: Who may open the website (0.0.0.0/0 = everyone; use <your-ip>/32 to restrict)
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: Optional. E-mail for an AWS Budgets alert (confirm the subscription e-mail AWS sends you). Leave empty for no alert.
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 20
+    MinValue: 1
+    Description: Monthly cost (US$, before credits) at which the alert e-mail is sent; actual costs are compared at 80 % and 100 %
   LatestAmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
 
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+
 Resources:
+  CostAlert:
+    Type: AWS::Budgets::Budget
+    Condition: HasAlertEmail
+    Properties:
+      Budget:
+        BudgetName: !Sub ${AWS::StackName}-monthly
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit: { Amount: !Ref MonthlyBudgetUsd, Unit: USD }
+        CostTypes: { IncludeCredit: false, IncludeRefund: false }
+      NotificationsWithSubscribers:
+        - Notification: { NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 80, ThresholdType: PERCENTAGE }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref AlertEmail }]
+        - Notification: { NotificationType: FORECASTED, ComparisonOperator: GREATER_THAN, Threshold: 100, ThresholdType: PERCENTAGE }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref AlertEmail }]
+
   WebSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -71,7 +99,7 @@ Resources:
       SecurityGroupIds: [!GetAtt WebSecurityGroup.GroupId]
       BlockDeviceMappings:
         - DeviceName: /dev/xvda
-          Ebs: { VolumeSize: 20, VolumeType: gp3, DeleteOnTermination: true, Encrypted: true }
+          Ebs: { VolumeSize: 16, VolumeType: gp3, DeleteOnTermination: true, Encrypted: true }
       MetadataOptions: { HttpTokens: required }
       Tags:
         - { Key: Name, Value: autoscalesim-lab }

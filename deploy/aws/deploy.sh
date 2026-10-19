@@ -3,7 +3,7 @@
 # Usage: deploy/aws/deploy.sh https://github.com/<you>/<repo>.git [branch] [region]
 # Needs: AWS CLI v2 configured with your own credentials (aws configure). Never commit credentials.
 set -euo pipefail
-REPO=${1:?repository URL required}; BRANCH=${2:-main}; REGION=${3:-${AWS_REGION:-ap-south-1}}
+REPO=${1:?repository URL required}; BRANCH=${2:-main}; REGION=${3:-${AWS_REGION:-ap-southeast-2}}
 STACK=${STACK_NAME:-autoscalesim-lab}
 cd "$(dirname "$0")"
 aws cloudformation deploy --region "$REGION" --stack-name "$STACK" --template-file autoscalesim-lab.yaml \

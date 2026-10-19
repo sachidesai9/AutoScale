@@ -1,5 +1,7 @@
 # AutoScaleSim Lab
 
+Repository: <https://github.com/sachidesai9/autoscale>
+
 **Reproduction and Extension of AutoScaleSim for Budget-Aware, Explainable and Predictive Cloud Auto-Scaling**
 
 This repository is built on the original **AutoScaleSim** simulator by Aslanpour, Toosi, Taheri and Gaire:
