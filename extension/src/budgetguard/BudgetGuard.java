@@ -527,7 +527,9 @@ public final class BudgetGuard {
         StringBuilder cp = new StringBuilder();
         for (String e : System.getProperty("java.class.path").split(File.pathSeparator))
             if (!e.isEmpty()) cp.append(cp.length() > 0 ? File.pathSeparator : "").append(Paths.get(e).toAbsolutePath());
-        List<String> cmd = new ArrayList<>(Arrays.asList(javaExe, "-Xmx2g", "-Duser.language=en", "-Duser.country=US",
+        String heap = System.getenv().getOrDefault("SIM_HEAP", "1g");   // a 7-day NASA run peaks at about 550 MB
+        if (!heap.matches("\\d+[mMgG]")) heap = "1g";
+        List<String> cmd = new ArrayList<>(Arrays.asList(javaExe, "-Xmx" + heap, "-Duser.language=en", "-Duser.country=US",
                 "-cp", cp.toString(), BudgetGuard.class.getName(), "run", "--mode", mode,
                 "--budget-inr", String.valueOf(cfg.budgetInr), "--target-rt", String.valueOf(cfg.targetRtSec),
                 "--inr-per-usd", String.valueOf(cfg.inrPerUsd)));
@@ -1088,6 +1090,9 @@ public final class BudgetGuard {
                         findDataDir(o), Paths.get(o.getOrDefault("out", "results/sweep_" + stamp)), System.out);
                 break;
             }
+            case "evaluate":
+                Evaluate.run(findDataDir(o), Paths.get(o.getOrDefault("out", "docs/results")), System.out);
+                break;
             case "samples":
                 writeSamples(findDataDir(o), Paths.get(o.getOrDefault("out", "samples")));
                 break;
@@ -1119,6 +1124,7 @@ public final class BudgetGuard {
                         + "  samples  [--out samples]                            regenerate sample workloads\n"
                         + "  analyse  --csv file.csv [--k 2.5]                   forecast and spike analysis\n"
                         + "  simulate --csv file.csv [--guard] [--budget-inr N]  replay a workload in AutoScaleSim\n"
+                        + "  evaluate [--out docs/results]                       run every experiment in the report\n"
                         + "  run      --mode original|observe|guard              one simulation (internal)");
         }
     }

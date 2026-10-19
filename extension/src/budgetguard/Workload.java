@@ -186,10 +186,12 @@ public final class Workload {
      * random with a fixed seed and sorts them, which matches the measured NASA trace (uniform across the minute,
      * many requests sharing a second); "even" spaces them evenly (kept only for the validation experiment).
      */
-    public void writeTset(Path file, String arrivals) {
+    public void writeTset(Path file, String arrivals) { writeTset(file, arrivals, ARRIVAL_SEED); }
+
+    public void writeTset(Path file, String arrivals, long seed) {
         int width = (int) Math.max(NASA_OUTPUT_SIZE, peak());
         DataSet ds = new DataSet(5, width);
-        java.util.Random rnd = new java.util.Random(ARRIVAL_SEED);
+        java.util.Random rnd = new java.util.Random(seed);
         for (int m = 0; m < perMinute.length; m++) {
             int n = (int) perMinute[m];
             int day = m / 1440 + 1, hour = (m % 1440) / 60, minute = m % 60;

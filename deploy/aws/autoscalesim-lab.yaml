@@ -1,0 +1,116 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  AutoScaleSim Lab - reproduction and extension of AutoScaleSim (Aslanpour et al., SIMPAT 2021).
+  One EC2 instance builds this repository's Docker image and runs the dashboard on port 80.
+  The stack only reports CREATE_COMPLETE after the app's /api/health endpoint answers.
+
+Parameters:
+  RepoUrl:
+    Type: String
+    Description: Public HTTPS URL of your GitHub repository (e.g. https://github.com/<you>/AutoScaleSim-Lab.git)
+    AllowedPattern: "https://.+"
+  Branch:
+    Type: String
+    Default: main
+    Description: Branch to deploy
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues: [t3.micro, t3.small, t3.medium]
+    Description: t3.small (2 GB) is recommended; t3.micro (1 GB) works with the 2 GB swap file but is slower
+  SimHeap:
+    Type: String
+    Default: 1g
+    AllowedPattern: "[0-9]+[mg]"
+    Description: Java heap for each simulation (a 7-day NASA run needs about 550 MB)
+  AllowedCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    Description: Who may open the website (0.0.0.0/0 = everyone; use <your-ip>/32 to restrict)
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Resources:
+  WebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: AutoScaleSim Lab - HTTP only (administration through Systems Manager, no SSH)
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref AllowedCidr
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  AppInstance:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT25M
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      SecurityGroupIds: [!GetAtt WebSecurityGroup.GroupId]
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs: { VolumeSize: 20, VolumeType: gp3, DeleteOnTermination: true, Encrypted: true }
+      MetadataOptions: { HttpTokens: required }
+      Tags:
+        - { Key: Name, Value: autoscalesim-lab }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          exec > >(tee /var/log/autoscalesim-setup.log) 2>&1
+          set -euxo pipefail
+          fail() { /opt/aws/bin/cfn-signal -e 1 --reason "$1" --stack ${AWS::StackName} --resource AppInstance --region ${AWS::Region}; exit 1; }
+          trap 'fail "setup script failed at line $LINENO; see /var/log/autoscalesim-setup.log"' ERR
+          dnf install -y docker git aws-cfn-bootstrap
+          systemctl enable --now docker
+          if [ ! -f /swapfile ]; then
+            fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
+            echo '/swapfile swap swap defaults 0 0' >> /etc/fstab
+          fi
+          rm -rf /opt/autoscalesim
+          git clone --depth 1 --branch ${Branch} ${RepoUrl} /opt/autoscalesim
+          cd /opt/autoscalesim
+          docker build -t autoscalesim-lab:latest .
+          docker volume create autoscalesim-data
+          docker rm -f autoscalesim || true
+          docker run -d --name autoscalesim --restart unless-stopped -p 80:8080 \
+            -e SIM_HEAP=${SimHeap} -v autoscalesim-data:/data autoscalesim-lab:latest
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1/api/health | grep -q '"status":"ok"'; then
+              /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --resource AppInstance --region ${AWS::Region}
+              exit 0
+            fi
+            sleep 5
+          done
+          fail "the dashboard did not answer /api/health within 5 minutes"
+
+Outputs:
+  WebsiteURL:
+    Description: Open this in a browser
+    Value: !Sub http://${AppInstance.PublicDnsName}/
+  HealthCheckURL:
+    Value: !Sub http://${AppInstance.PublicDnsName}/api/health
+  InstanceId:
+    Description: "Use Systems Manager > Session Manager to open a shell (logs: sudo docker logs autoscalesim)"
+    Value: !Ref AppInstance
