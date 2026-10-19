@@ -30,6 +30,7 @@ import autoscalesim.applicationprovider.ApplicationProvider;
 import autoscalesim.applicationprovider.autoscaling.Analyzer;
 import autoscalesim.applicationprovider.autoscaling.Executor;
 import autoscalesim.applicationprovider.autoscaling.ExecutorSimple;
+import autoscalesim.applicationprovider.autoscaling.ExecutorSuperProfessional;
 import autoscalesim.applicationprovider.autoscaling.Monitor;
 import autoscalesim.applicationprovider.autoscaling.Planner;
 import autoscalesim.applicationprovider.autoscaling.PlannerRuleBased;
@@ -187,10 +188,25 @@ public final class BudgetGuard {
     }
 
     public static String explain(DecisionRecord r, GuardConfig cfg, double dtUp, double dtDown, int minVms, boolean enforce) {
+        return explain(r, cfg, "SLA_AWARE", 70, 40, dtUp, dtDown, minVms, enforce);
+    }
+
+    public static String explain(DecisionRecord r, GuardConfig cfg, String rule, double cpuUp, double cpuDown,
+                                 double dtUp, double dtDown, int minVms, boolean enforce) {
         double rate = cfg.inrPerUsd;
         StringBuilder s = new StringBuilder();
-        // (a) trigger and original action — the default rule is SLA-aware on analysed delay time
-        if (r.originalDecision == Policy.UP)
+        // (a) trigger and original action
+        if (rule.equals("RESOURCE_AWARE")) {
+            if (r.originalDecision == Policy.UP)
+                s.append(String.format(Locale.ROOT, "Analysed CPU utilisation %.1f%% was above the scale-up threshold (%.0f%%), so the original resource-aware rule decided SCALE_UP. ", r.cpuUtil, cpuUp));
+            else if (r.originalDecision == Policy.DOWN)
+                s.append(String.format(Locale.ROOT, "Analysed CPU utilisation %.1f%% was below the scale-down threshold (%.0f%%), so the original rule decided SCALE_DOWN. ", r.cpuUtil, cpuDown));
+            else
+                s.append(String.format(Locale.ROOT, "Analysed CPU utilisation %.1f%% was between %.0f%% and %.0f%%, so the original rule decided DO_NOTHING. ", r.cpuUtil, cpuDown, cpuUp));
+        } else if (!rule.equals("SLA_AWARE")) {
+            s.append(String.format(Locale.ROOT, "With analysed CPU utilisation %.1f%% and delay time %.3f s, the original %s rule decided %s. ",
+                    r.cpuUtil, r.delayTime, rule, Policy.decisionName(r.originalDecision)));
+        } else if (r.originalDecision == Policy.UP)
             s.append(String.format(Locale.ROOT, "Analysed delay time %.3f s was above the scale-up threshold (%.2f s), so the original SLA-aware rule decided SCALE_UP. ", r.delayTime, dtUp));
         else if (r.originalDecision == Policy.DOWN)
             s.append(String.format(Locale.ROOT, "Analysed delay time %.3f s was below the scale-down threshold (%.2f s), so the original rule decided SCALE_DOWN. ", r.delayTime, dtDown));
@@ -237,7 +253,8 @@ public final class BudgetGuard {
     public static final class GuardedPlanner extends PlannerRuleBased {
         final GuardConfig cfg;
         final boolean enforce;
-        final double horizonSec, lookaheadSec, dtUp, dtDown;
+        final double horizonSec, lookaheadSec, dtUp, dtDown, cpuUpT, cpuDownT;
+        final String ruleName;
         final int minVms;
         final List<DecisionRecord> records = new ArrayList<>();
 
@@ -251,6 +268,9 @@ public final class BudgetGuard {
             this.lookaheadSec = lookaheadSec;
             this.dtUp = dtUp;
             this.dtDown = dtDown;
+            this.cpuUpT = cpuUp;
+            this.cpuDownT = cpuDown;
+            this.ruleName = rule.name();
             this.minVms = minVms;
         }
 
@@ -288,7 +308,7 @@ public final class BudgetGuard {
             r.status = o.status;
             r.budgetOk = o.budgetOk;
             r.perfOk = o.perfOk;
-            r.explanation = explain(r, cfg, dtUp, dtDown, minVms, enforce);
+            r.explanation = explain(r, cfg, ruleName, cpuUpT, cpuDownT, dtUp, dtDown, minVms, enforce);
             records.add(r);
 
             if (enforce && o.guardedDecision != rec.getDecision()) {
@@ -303,65 +323,139 @@ public final class BudgetGuard {
     // ------------------------------------------------------------------------------------------
 
     /**
-     * Same experiment as autoscalesim.ExperimentalSetup.main (default NASA scenario).
-     * Every value below is copied from ExperimentalSetup.main; the original private helper
-     * methods are called by reflection so entity creation is identical. The integration test
-     * checks that "observe" mode produces byte-identical output CSVs to the original main().
+     * One simulation configuration. Defaults are copied from autoscalesim.ExperimentalSetup.main
+     * (NASA, 7 days). The alternative values for the Wikipedia scenario are the ones the authors
+     * documented in the comments of ExperimentalSetup.main ("NASA=..., Wikipedia=...").
+     * The integration test proves that the default scenario, run through this runner in observe
+     * mode, produces byte-identical output to the authors' own main().
      */
-    static void runSetup(GuardConfig cfg, boolean enforce) throws Exception {
-        System.out.println("Starting AutoScaleSim Simulation... (BudgetGuard " + (enforce ? "guard" : "observe") + " mode)");
+    public static final class Scenario {
+        public String name = "NASA default (ExperimentalSetup.main)";
+        public String dataset = "NASA";
+        public int simMinutes = 7 * 1440;
+        public int cloudletLength = 5000, pes = 2, cloudletTimeout = 30, minCloudletLength = 0, maxCloudletLength = 245000;
+        public int initialVMs = 2, scalingInterval = 10;
+        public double slaDelay = 1.0;
+        public String analysis = "SIMPLE";
+        public double sesAlphaCpu = 0.2, sesAlphaDelay = 0.1;
+        public int timeWindow = 10;
+        public String rule = "SLA_AWARE";
+        public int vmConfig = AutoScaleSimTags.VM_CONFIG_T2MEDIUM;
+        public double cpuUp = 70, cpuDown = 40, dtUp = 1, dtDown = 0.2;
+        public String executor = "SIMPLE", surplus = "THE_OLDEST";
+        public int cooldownMin = 0, maxVm = 40, minVm = 1;
+        public double startupDelayMin = 5;
+
+        public static Scenario nasaDefault() { return new Scenario(); }
+
+        public static Scenario wikipediaDocumented() {
+            Scenario s = new Scenario();
+            s.name = "Wikipedia (values documented in ExperimentalSetup comments)";
+            s.dataset = "WIKIPEDIA"; s.simMinutes = 4 * 60; s.pes = 1; s.cloudletTimeout = 50; s.initialVMs = 1;
+            s.scalingInterval = 2; s.sesAlphaCpu = 0.1; s.timeWindow = 5; s.vmConfig = AutoScaleSimTags.VM_CONFIG_T2SMALL;
+            s.dtUp = 0.140; s.dtDown = 0.130; s.startupDelayMin = 1; s.maxVm = 10;
+            return s;
+        }
+
+        public boolean isNasaDefault() { return toProperties().equals(new Scenario().toProperties()); }
+
+        public Properties toProperties() {
+            Properties p = new Properties();
+            for (java.lang.reflect.Field f : Scenario.class.getFields())
+                if (!java.lang.reflect.Modifier.isStatic(f.getModifiers()) && !f.getName().equals("name"))
+                    try { p.setProperty(f.getName(), String.valueOf(f.get(this))); } catch (IllegalAccessException e) { throw new RuntimeException(e); }
+            return p;
+        }
+
+        public static Scenario fromProperties(Properties p) {
+            Scenario s = new Scenario();
+            for (java.lang.reflect.Field f : Scenario.class.getFields()) {
+                String v = p.getProperty(f.getName());
+                if (v == null || java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
+                try {
+                    if (f.getType() == int.class) f.setInt(s, Integer.parseInt(v.trim()));
+                    else if (f.getType() == double.class) f.setDouble(s, Double.parseDouble(v.trim()));
+                    else f.set(s, v);
+                } catch (IllegalAccessException e) { throw new RuntimeException(e); }
+            }
+            s.validate();
+            return s;
+        }
+
+        public void validate() {
+            ScalingRule.valueOf(rule); ExecutorType.valueOf(executor); SurplusVMSelectionPolicy.valueOf(surplus);
+            Method.valueOf(analysis); DATASET.valueOf(dataset);
+            if (simMinutes < 1 || scalingInterval < 1 || initialVMs < 1 || minVm < 1 || maxVm < minVm || vmConfig < 0 || vmConfig > 3)
+                throw new IllegalArgumentException("Invalid scenario values");
+        }
+
+        /** Nominal requests per minute one VM can complete at 100% CPU (from VM MIPS/PEs and request length). */
+        public double vmCapacityPerMinute() {
+            // CloudSim executes a request of length L on each of its PEs: one request needs L * pes MI in total.
+            return 60.0 * AutoScaleSimTags.VM_MIPS[vmConfig] * AutoScaleSimTags.VM_PES[vmConfig] / ((double) cloudletLength * pes);
+        }
+
+        public Scenario copy() { Scenario s = fromProperties(toProperties()); s.name = name; return s; }
+    }
+
+    static Scenario readScenarioFile(Path f) throws IOException {
+        if (!Files.exists(f)) return Scenario.nasaDefault();
+        Properties p = new Properties();
+        try (Reader r = Files.newBufferedReader(f, StandardCharsets.UTF_8)) { p.load(r); }
+        Scenario s = Scenario.fromProperties(p);
+        s.name = p.getProperty("name", s.name);
+        return s;
+    }
+
+    static void writeScenarioFile(Scenario s, Path f) throws IOException {
+        Properties p = s.toProperties();
+        p.setProperty("name", s.name);
+        try (Writer w = Files.newBufferedWriter(f, StandardCharsets.UTF_8)) { p.store(w, "AutoScaleSim scenario"); }
+    }
+
+    /** Builds the same entities, in the same order, as ExperimentalSetup.main, with values from the scenario. */
+    static void runSetup(GuardConfig cfg, boolean enforce, Scenario sc) throws Exception {
+        System.out.println("Starting AutoScaleSim Simulation... (BudgetGuard " + (enforce ? "guard" : "observe") + " mode, " + sc.name + ")");
         call("cloudSimSetup", new Class<?>[]{});
 
-        final int SIMULATION_LIMIT = 7 * 1440;
-        DATASET datasetType = DATASET.NASA;
-        final int CLOUDLET_LENGTH = 5000;
-        final int PES_NUMBER = 2;
-        int cloudletTimeout = 30;
-        int minCloudletLength = 0;
-        int maxCloudletLength = 245000;
+        final int SIMULATION_LIMIT = sc.simMinutes;
+        DATASET datasetType = DATASET.valueOf(sc.dataset);
 
         LoadAdmission loadAdmission = new LoadAdmission();
         LoadBalancing loadBalancing = new LoadBalancingRoundRobin();
         int cloudletSchedulerName = AutoScaleSimTags.TimeShared;
-        int initialVMs = 2;
-        int scalingInterval = 10;
-        double slaContractOnDelayTime = 1.0;
         Monitor monitor = new Monitor();
         String[] analysisMethod = new String[10];
-        Arrays.fill(analysisMethod, Method.SIMPLE.name());
-        double[] sESAlpha = {0.2, 0, 0, 0, 0.1, 0, 0, 0, 0, 0};
-        int timeWindow = scalingInterval;
-        Analyzer analyzer = new Analyzer(analysisMethod, timeWindow, sESAlpha);
+        Arrays.fill(analysisMethod, Method.valueOf(sc.analysis).name());
+        double[] sESAlpha = {sc.sesAlphaCpu, 0, 0, 0, sc.sesAlphaDelay, 0, 0, 0, 0, 0};
+        Analyzer analyzer = new Analyzer(analysisMethod, sc.timeWindow, sESAlpha);
 
-        final ScalingRule rule = ScalingRule.SLA_AWARE;
-        final int configurationType = AutoScaleSimTags.VM_CONFIG_T2MEDIUM;
-        double cpuScaleUpThreshold = 70, cpuScaleDownThreshold = 40;
-        double delayTimeScaleUpThreshold = 1, delayTimeScaleDownThreshold = 0.2;
-        final int maxOnDemandVm = 40, minOnDemandVm = 1;
+        GuardedPlanner planner = new GuardedPlanner(ScalingRule.valueOf(sc.rule), sc.vmConfig, sc.cpuUp, sc.cpuDown,
+                sc.dtUp, sc.dtDown, cfg, enforce, SIMULATION_LIMIT * (double) AutoScaleSimTags.aMinute,
+                sc.scalingInterval * (double) AutoScaleSimTags.aMinute, sc.minVm);
 
-        GuardedPlanner planner = new GuardedPlanner(rule, configurationType, cpuScaleUpThreshold, cpuScaleDownThreshold,
-                delayTimeScaleUpThreshold, delayTimeScaleDownThreshold, cfg, enforce,
-                SIMULATION_LIMIT * (double) AutoScaleSimTags.aMinute, scalingInterval * (double) AutoScaleSimTags.aMinute, minOnDemandVm);
+        final ExecutorType executorType = ExecutorType.valueOf(sc.executor);
+        final SurplusVMSelectionPolicy surplus = SurplusVMSelectionPolicy.valueOf(sc.surplus);
+        final int COOLDOWN = sc.cooldownMin * AutoScaleSimTags.aMinute;
 
-        final ExecutorType executorType = ExecutorType.SIMPLE;
-        final SurplusVMSelectionPolicy surplus = SurplusVMSelectionPolicy.THE_OLDEST;
-        final int COOLDOWN = 0 * AutoScaleSimTags.aMinute;
-
-        call("createCloudProvider", new Class<?>[]{int.class}, cloudletTimeout);
+        call("createCloudProvider", new Class<?>[]{int.class}, sc.cloudletTimeout);
         String startUpDelayType = "Static";
-        final double BASE_DELAY_IN_VM_START_UP = 5 * AutoScaleSimTags.aMinute;
-        Executor executor = new ExecutorSimple(executorType, surplus, COOLDOWN, maxOnDemandVm, minOnDemandVm,
+        final double BASE_DELAY_IN_VM_START_UP = sc.startupDelayMin * AutoScaleSimTags.aMinute;
+        Executor executor = new ExecutorSimple(executorType, surplus, COOLDOWN, sc.maxVm, sc.minVm,
                 startUpDelayType, BASE_DELAY_IN_VM_START_UP);
+        if (executorType == ExecutorType.SUPREX)
+            executor = new ExecutorSuperProfessional(executorType, surplus, COOLDOWN, sc.maxVm, sc.minVm,
+                    startUpDelayType, BASE_DELAY_IN_VM_START_UP);
         final String[] reports = new String[]{"M_VM", "M_User", "M_SLA", "", "", ""};
 
         call("createEndUserEmulator",
                 new Class<?>[]{String.class, int.class, DATASET.class, int.class, int.class, int.class, int.class},
-                "EndUserEmulator", SIMULATION_LIMIT, datasetType, CLOUDLET_LENGTH, PES_NUMBER, minCloudletLength, maxCloudletLength);
+                "EndUserEmulator", SIMULATION_LIMIT, datasetType, sc.cloudletLength, sc.pes, sc.minCloudletLength, sc.maxCloudletLength);
         call("createApplicationProvider",
                 new Class<?>[]{String.class, int.class, DATASET.class, LoadAdmission.class, LoadBalancing.class, int.class,
                         int.class, double.class, Monitor.class, Analyzer.class, Planner.class, Executor.class, String[].class},
-                "ApplicationProvider", initialVMs, datasetType, loadAdmission, loadBalancing, cloudletSchedulerName,
-                scalingInterval, slaContractOnDelayTime, monitor, analyzer, planner, executor, reports);
+                "ApplicationProvider", sc.initialVMs, datasetType, loadAdmission, loadBalancing, cloudletSchedulerName,
+                sc.scalingInterval, sc.slaDelay, monitor, analyzer, planner, executor, reports);
 
         CloudSim.startSimulation();
         CloudSim.stopSimulation();
@@ -408,27 +502,44 @@ public final class BudgetGuard {
     }
 
     static RunResult runChild(String mode, GuardConfig cfg, Path dataDir, Path runDir, PrintStream progress) throws Exception {
+        return runChild(mode, cfg, Scenario.nasaDefault(), dataDir, runDir, null, progress);
+    }
+
+    /**
+     * Runs one simulation in a fresh JVM whose working directory is runDir (the original code reads and
+     * writes the relative folder "src/others/"). If workloadTset is given, it is placed where the original
+     * EndUserEmulator loads the NASA trace from, so the unmodified emulator replays the user's workload.
+     */
+    static RunResult runChild(String mode, GuardConfig cfg, Scenario sc, Path dataDir, Path runDir, Path workloadTset,
+                              PrintStream progress) throws Exception {
+        if (mode.equals("original") && (!sc.isNasaDefault() || workloadTset != null))
+            throw new IllegalArgumentException("mode 'original' runs the authors' unmodified main(), which only supports the default NASA scenario; use 'observe'");
         Path others = runDir.resolve("src").resolve("others");
         Files.createDirectories(others);
         Path tset = others.resolve("Dataset_NASA_July.tset");
-        if (!Files.exists(tset)) {
-            Path src = dataDir.resolve("Dataset_NASA_July.tset");
-            if (!Files.exists(src)) throw new FileNotFoundException("Dataset not found: " + src.toAbsolutePath());
-            try { Files.createLink(tset, src.toAbsolutePath()); } catch (Exception e) { Files.copy(src, tset); }
-        }
-        String java = Paths.get(System.getProperty("java.home"), "bin", "java").toString();
+        if (workloadTset != null) Files.copy(workloadTset, tset, StandardCopyOption.REPLACE_EXISTING);
+        else if (sc.dataset.equals("NASA")) linkOrCopy(dataDir.resolve("Dataset_NASA_July.tset"), tset);
+        if (sc.dataset.equals("WIKIPEDIA"))
+            linkOrCopy(dataDir.resolve("Dataset_Wikipedia_4hour.csv"), others.resolve("Dataset_Wikipedia_4hour.csv"));
+        writeScenarioFile(sc, runDir.resolve("scenario.properties"));
+
+        String javaExe = Paths.get(System.getProperty("java.home"), "bin", "java").toString();
         StringBuilder cp = new StringBuilder();
         for (String e : System.getProperty("java.class.path").split(File.pathSeparator))
             if (!e.isEmpty()) cp.append(cp.length() > 0 ? File.pathSeparator : "").append(Paths.get(e).toAbsolutePath());
-        List<String> cmd = new ArrayList<>(Arrays.asList(java, "-Xmx2g", "-Duser.language=en", "-Duser.country=US",
+        List<String> cmd = new ArrayList<>(Arrays.asList(javaExe, "-Xmx2g", "-Duser.language=en", "-Duser.country=US",
                 "-cp", cp.toString(), BudgetGuard.class.getName(), "run", "--mode", mode,
                 "--budget-inr", String.valueOf(cfg.budgetInr), "--target-rt", String.valueOf(cfg.targetRtSec),
                 "--inr-per-usd", String.valueOf(cfg.inrPerUsd)));
-        if (progress != null) progress.println("  running " + mode + " simulation in " + runDir + " ...");
+        if (progress != null) progress.println("  running " + mode + " simulation (" + sc.name + ") ...");
         long t0 = System.currentTimeMillis();
         Process p = new ProcessBuilder(cmd).directory(runDir.toFile()).redirectErrorStream(true)
                 .redirectOutput(runDir.resolve("console.log").toFile()).start();
-        int code = p.waitFor();
+        if (!p.waitFor(30, java.util.concurrent.TimeUnit.MINUTES)) {
+            p.destroyForcibly();
+            throw new IllegalStateException(mode + " simulation timed out after 30 minutes");
+        }
+        int code = p.exitValue();
         RunResult rr = collect(mode, runDir);
         rr.exitCode = code;
         rr.seconds = (System.currentTimeMillis() - t0) / 1000;
@@ -436,6 +547,66 @@ public final class BudgetGuard {
             throw new IllegalStateException(mode + " simulation failed (exit " + code + "); see " + runDir.resolve("console.log"));
         if (progress != null) progress.println("  " + mode + " finished in " + rr.seconds + " s");
         return rr;
+    }
+
+    /**
+     * Replays an uploaded workload through AutoScaleSim: the default NASA scenario with the trace replaced by
+     * the workload (converted to the original DataSet format) and the simulation length set to its length.
+     * The "observe" run executes the original policy; the optional "guard" run executes the budget guard.
+     */
+    static List<RunResult> simulateWorkload(Workload w, GuardConfig cfg, boolean withGuard, Path dataDir, Path outDir,
+                                            PrintStream progress) throws Exception {
+        Files.createDirectories(outDir);
+        Path tset = outDir.resolve("workload.tset");
+        w.writeTset(tset);
+        Workload.writeCsv(outDir.resolve("workload.csv"), w.perMinute, w.name);
+        Scenario sc = Scenario.nasaDefault();
+        sc.name = "Uploaded workload: " + w.name;
+        sc.simMinutes = w.perMinute.length;
+        List<RunResult> out = new ArrayList<>();
+        out.add(runChild("observe", cfg, sc, dataDir, outDir.resolve("original_policy"), tset, progress));
+        if (withGuard) out.add(runChild("guard", cfg, sc, dataDir, outDir.resolve("guard"), tset, progress));
+        return out;
+    }
+
+    /** Writes the demo CSVs. Real data comes from the authors' NASA trace; synthetic data is labelled as such. */
+    static void writeSamples(Path dataDir, Path out) throws IOException {
+        Files.createDirectories(out);
+        Path tset = dataDir.resolve("Dataset_NASA_July.tset");
+        // week 2 of the NASA trace (days 8-14): real data that the default 7-day experiment never uses
+        double[] week2 = Workload.nasaMinutes(tset, 7 * 1440, 14 * 1440);
+        Workload.writeCsv(out.resolve("nasa_week2_per_minute.csv"), week2, "NASA trace days 8-14");
+        // 3 days of NASA days 8-10 with a SYNTHETIC flash crowd (x3 for 40 minutes on day 3, 14:00) for demonstrations
+        double[] flash = Workload.nasaMinutes(tset, 7 * 1440, 10 * 1440);
+        int start = 2 * 1440 + 14 * 60;
+        for (int i = 0; i < 40; i++) {
+            double ramp = i < 10 ? 1 + 0.2 * (i + 1) : 3;          // 10-minute ramp up to x3
+            flash[start + i] = Math.min(Workload.MAX_PER_MINUTE, Math.round(flash[start + i] * ramp));
+        }
+        Workload.writeCsv(out.resolve("synthetic_flash_crowd_3days.csv"), flash, "synthetic");
+        // a small request-log example (synthetic): one row per request with an ISO timestamp
+        StringBuilder log = new StringBuilder("timestamp,path\n");
+        java.util.Random rnd = new java.util.Random(42);
+        long t0 = java.time.LocalDateTime.of(2026, 1, 5, 9, 0).toEpochSecond(java.time.ZoneOffset.UTC);
+        for (int m = 0; m < 180; m++) {
+            int n = 20 + (int) (15 * Math.sin(m / 30.0)) + (m >= 120 && m < 135 ? 60 : 0) + rnd.nextInt(5);
+            for (int i = 0; i < n; i++)
+                log.append(java.time.Instant.ofEpochSecond(t0 + m * 60L + (i * 60L) / n)).append(",/index.html\n");
+        }
+        Files.write(out.resolve("synthetic_request_log_3h.csv"), log.toString().getBytes(StandardCharsets.UTF_8));
+        Files.write(out.resolve("README.md"), ("# Sample workloads\n\n"
+                + "| File | Source | Format |\n|---|---|---|\n"
+                + "| nasa_week2_per_minute.csv | **Real**: NASA trace shipped with AutoScaleSim (`src/others/Dataset_NASA_July.tset`), days 8-14, not used by the default 7-day experiment | per-minute counts |\n"
+                + "| synthetic_flash_crowd_3days.csv | **Synthetic**: NASA days 8-10 with an injected flash crowd (10-minute ramp to 3x, 40 minutes, day 3 at 14:00) | per-minute counts |\n"
+                + "| synthetic_request_log_3h.csv | **Synthetic**: generated request log (seed 42), one row per request, ISO-8601 timestamps | request log |\n\n"
+                + "Regenerate with `BudgetGuard samples`.\n").getBytes(StandardCharsets.UTF_8));
+        System.out.println("Samples written to " + out.toAbsolutePath());
+    }
+
+    static void linkOrCopy(Path src, Path dst) throws IOException {
+        if (Files.exists(dst)) return;
+        if (!Files.exists(src)) throw new FileNotFoundException("Dataset not found: " + src.toAbsolutePath());
+        try { Files.createLink(dst, src.toAbsolutePath()); } catch (Exception e) { Files.copy(src, dst); }
     }
 
     static RunResult collect(String mode, Path runDir) throws IOException {
@@ -800,273 +971,8 @@ public final class BudgetGuard {
     }
 
     // ------------------------------------------------------------------------------------------
-    // 9. Web interface (JDK built-in HTTP server; each request runs real simulations)
+    // 9. Shared helpers
     // ------------------------------------------------------------------------------------------
-
-    static final AtomicReference<String> JOB = new AtomicReference<>(null);
-    static final StringBuffer JOB_LOG = new StringBuffer();
-
-    static void serve(int port, Path dataDir, Path resultsDir) throws IOException {
-        Files.createDirectories(resultsDir);
-        HttpServer server = HttpServer.create(new InetSocketAddress("0.0.0.0", port), 0);
-        server.createContext("/health", ex -> send(ex, 200, "text/plain", "ok"));
-        server.createContext("/run", ex -> {
-            if (!"POST".equals(ex.getRequestMethod())) { send(ex, 405, "text/plain", "POST only"); return; }
-            Map<String, String> f = form(new String(readAll(ex.getRequestBody()), StandardCharsets.UTF_8));
-            GuardConfig cfg;
-            try {
-                cfg = new GuardConfig(num(f.get("budget")), num(f.get("target")), num(f.get("rate")));
-            } catch (IllegalArgumentException e) {
-                send(ex, 400, "text/html; charset=utf-8", page("Invalid input", "<div class='card warnbox'>" + esc(e.getMessage()) + "</div><a href='/'>Back</a>"));
-                return;
-            }
-            String id = new SimpleDateFormat("yyyyMMdd-HHmmss").format(new Date()) + "_b" + (long) cfg.budgetInr;
-            if (!JOB.compareAndSet(null, id)) {
-                send(ex, 409, "text/html; charset=utf-8", page("Busy", "<div class=card>A comparison is already running. <a href='/job'>See progress</a></div>"));
-                return;
-            }
-            JOB_LOG.setLength(0);
-            final GuardConfig c = cfg;
-            new Thread(() -> {
-                PrintStream ps = new PrintStream(new OutputStream() {
-                    public void write(int b) { JOB_LOG.append((char) b); }
-                }, true);
-                try { compare(c, dataDir, resultsDir.resolve(id), ps); ps.println("DONE " + id); }
-                catch (Exception e) { ps.println("FAILED: " + e.getMessage()); }
-                finally { JOB.set(null); }
-            }).start();
-            ex.getResponseHeaders().add("Location", "/job");
-            send(ex, 303, "text/plain", "started");
-        });
-        server.createContext("/job", ex -> {
-            String running = JOB.get();
-            String log = JOB_LOG.toString();
-            Matcher m = Pattern.compile("DONE (\\S+)").matcher(log);
-            String body = "<div class=card><pre style='white-space:pre-wrap'>" + esc(log.isEmpty() ? "(no job yet)" : log) + "</pre></div>"
-                    + (m.find() ? "<p><a href='/r/" + m.group(1) + "/report.html'>Open the report</a></p>" : "") + "<p><a href='/'>Home</a></p>";
-            send(ex, 200, "text/html; charset=utf-8", page("Simulation progress", (running != null ? "<meta http-equiv=refresh content=3>" : "") + body));
-        });
-        server.createContext("/r/", ex -> {
-            String rel = URLDecoder.decode(ex.getRequestURI().getPath().substring(3), "UTF-8");
-            Path p = resultsDir.resolve(rel).normalize();
-            if (!p.startsWith(resultsDir.normalize()) || !Files.isRegularFile(p) || rel.contains("..")) { send(ex, 404, "text/plain", "not found"); return; }
-            String type = rel.endsWith(".html") ? "text/html; charset=utf-8" : rel.endsWith(".csv") ? "text/csv; charset=utf-8" : "text/plain; charset=utf-8";
-            byte[] b = Files.readAllBytes(p);
-            ex.getResponseHeaders().add("Content-Type", type);
-            ex.sendResponseHeaders(200, b.length);
-            try (OutputStream o = ex.getResponseBody()) { o.write(b); }
-        });
-        server.createContext("/", ex -> {
-            if (!ex.getRequestURI().getPath().equals("/")) { send(ex, 404, "text/plain", "not found"); return; }
-            StringBuilder b = new StringBuilder();
-            b.append("<p class=sub>Reproduction of AutoScaleSim (Aslanpour, Toosi, Taheri &amp; Gaire, SIMPAT 2021, ")
-                    .append("<a href='https://doi.org/10.1016/j.simpat.2020.102245'>doi:10.1016/j.simpat.2020.102245</a>) with a Budget-Guarded, Explainable Auto-Scaling extension. ")
-                    .append("Each run executes three real simulations of the NASA 7-day workload (about 30–60 s in total).</p>");
-            b.append("<form class=card method=post action=/run><b>Run a comparison</b><br><br>")
-                    .append("<label>Budget for the 7 simulated days (₹) <input name=budget type=number step=any min=1 value=2000 required></label><br><br>")
-                    .append("<label>Response-time target (s) <input name=target type=number step=any min=0.01 value=4.0 required></label><br><br>")
-                    .append("<label>Exchange-rate assumption (₹ per US$) <input name=rate type=number step=any min=0.01 value=" + DEFAULT_INR_PER_USD + " required></label><br><br>")
-                    .append("<button type=submit>Run original + extension</button> ")
-                    .append(JOB.get() != null ? "<a href='/job'>A job is running, see progress</a>" : "").append("</form>");
-            b.append("<h2>Experiment history</h2><div class='card scroll'><table><tr><th>Run</th><th>Budget ₹</th><th>RT target s</th><th>Original renting ₹</th><th>Guarded renting ₹</th></tr>");
-            List<Path> dirs = new ArrayList<>();
-            try (DirectoryStream<Path> ds = Files.newDirectoryStream(resultsDir)) { for (Path d : ds) if (Files.exists(d.resolve("meta.properties"))) dirs.add(d); }
-            dirs.sort(Comparator.reverseOrder());
-            for (Path d : dirs) {
-                Properties p = new Properties();
-                try (Reader r = Files.newBufferedReader(d.resolve("meta.properties"))) { p.load(r); }
-                String n = d.getFileName().toString();
-                b.append("<tr><td><a href='/r/").append(n).append("/report.html'>").append(esc(n)).append("</a></td><td class=n>").append(p.getProperty("budget_inr"))
-                        .append("</td><td class=n>").append(p.getProperty("target_rt_s")).append("</td><td class=n>").append(p.getProperty("original_renting_inr"))
-                        .append("</td><td class=n>").append(p.getProperty("guard_renting_inr")).append("</td></tr>");
-            }
-            b.append("</table></div>");
-            send(ex, 200, "text/html; charset=utf-8", page("AutoScaleSim + BudgetGuard", b.toString()));
-        });
-        server.start();
-        System.out.println("BudgetGuard web interface on http://localhost:" + port + "/  (data: " + dataDir.toAbsolutePath() + ")");
-    }
-
-    static String page(String title, String body) {
-        return "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>" + esc(title)
-                + "</title><style>" + Report.CSS + "</style></head><body><main><h1>" + esc(title) + "</h1>" + body + "</main></body></html>";
-    }
-
-    static void send(HttpExchange ex, int code, String type, String body) throws IOException {
-        byte[] b = body.getBytes(StandardCharsets.UTF_8);
-        ex.getResponseHeaders().add("Content-Type", type);
-        ex.sendResponseHeaders(code, b.length);
-        try (OutputStream o = ex.getResponseBody()) { o.write(b); }
-    }
-
-    static Map<String, String> form(String body) throws UnsupportedEncodingException {
-        Map<String, String> m = new HashMap<>();
-        for (String kv : body.split("&")) {
-            int i = kv.indexOf('=');
-            if (i > 0) m.put(URLDecoder.decode(kv.substring(0, i), "UTF-8"), URLDecoder.decode(kv.substring(i + 1), "UTF-8"));
-        }
-        return m;
-    }
-
-    static double num(String s) {
-        if (s == null || s.trim().isEmpty()) throw new IllegalArgumentException("All fields are required");
-        try { return Double.parseDouble(s.trim()); } catch (NumberFormatException e) { throw new IllegalArgumentException("Not a number: " + s); }
-    }
-
-    static byte[] readAll(InputStream in) throws IOException {
-        ByteArrayOutputStream bo = new ByteArrayOutputStream();
-        byte[] buf = new byte[8192];
-        int n;
-        while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
-        return bo.toByteArray();
-    }
-
-    // ------------------------------------------------------------------------------------------
-    // 10. Self-tests
-    // ------------------------------------------------------------------------------------------
-
-    static int passed, failed;
-
-    static void check(String name, boolean ok) {
-        if (ok) passed++; else failed++;
-        System.out.println((ok ? "  PASS  " : "  FAIL  ") + name);
-    }
-
-    static boolean throwsIAE(Runnable r) {
-        try { r.run(); return false; } catch (IllegalArgumentException e) { return true; }
-    }
-
-    static void unitTests() throws Exception {
-        System.out.println("Unit tests");
-        // configuration validation
-        check("valid config accepted", !throwsIAE(() -> new GuardConfig(2000, 4, 85)));
-        check("zero budget rejected", throwsIAE(() -> new GuardConfig(0, 4, 85)));
-        check("negative budget rejected", throwsIAE(() -> new GuardConfig(-5, 4, 85)));
-        check("NaN budget rejected", throwsIAE(() -> new GuardConfig(Double.NaN, 4, 85)));
-        check("infinite budget rejected", throwsIAE(() -> new GuardConfig(Double.POSITIVE_INFINITY, 4, 85)));
-        check("zero RT target rejected", throwsIAE(() -> new GuardConfig(2000, 0, 85)));
-        check("negative exchange rate rejected", throwsIAE(() -> new GuardConfig(2000, 4, -1)));
-        check("non-numeric form value rejected", throwsIAE(() -> num("abc")));
-        check("empty form value rejected", throwsIAE(() -> num(" ")));
-        check("budget converted to USD", Math.abs(new GuardConfig(850, 4, 85).budgetUsd() - 10) < 1e-9);
-
-        // billing — same rule as the original simulator
-        check("live VM 90 min billed 2 hours", Math.abs(Policy.vmChargeUsd(false, 0, 0, 5400, 0.04) - 0.08) < 1e-12);
-        check("live VM just requested billed 1 hour", Math.abs(Policy.vmChargeUsd(false, 0, 100, 100, 0.04) - 0.04) < 1e-12);
-        check("live VM exactly 1 hour billed 1 hour", Math.abs(Policy.vmChargeUsd(false, 0, 0, 3600, 0.04) - 0.04) < 1e-12);
-        check("destroyed VM uses its final bill", Policy.vmChargeUsd(true, 0.12, 0, 99999, 0.04) == 0.12);
-
-        // pacing
-        double T = 7 * 24 * 3600.0;
-        check("allowance at t=0 is one hour of budget", Math.abs(Policy.allowanceUsd(168, 0, T, 0) - 1.0) < 1e-9);
-        check("allowance capped at full budget", Policy.allowanceUsd(168, T, T, 0) == 168);
-        check("allowance keeps the minimum-fleet reserve", Math.abs(Policy.allowanceUsd(168, T, T, 0.04) - 167.96) < 1e-9);
-
-        // decision rule
-        int UP = Policy.UP, DOWN = Policy.DOWN, NO = Policy.NOTHING;
-        Outcome o = Policy.decide(UP, 1.0, 0.04, 2.0, 3, 1, 3.0, 4.0);
-        check("affordable scale-up allowed", o.guardedDecision == UP && o.status == Status.OK);
-        o = Policy.decide(UP, 1.0, 0.04, 2.0, 3, 1, 5.0, 4.0);
-        check("affordable scale-up with missed target -> PERF_MISS", o.guardedDecision == UP && o.status == Status.PERF_MISS);
-        o = Policy.decide(UP, 1.96, 0.04, 2.0, 3, 1, 3.0, 4.0);
-        check("budget-limit is inclusive (exactly at allowance allowed)", o.guardedDecision == UP);
-        o = Policy.decide(UP, 1.99, 0.04, 2.0, 3, 1, 3.0, 4.0);
-        check("unaffordable scale-up held, target met -> BUDGET_HOLD", o.guardedDecision == NO && o.status == Status.BUDGET_HOLD);
-        o = Policy.decide(UP, 1.99, 0.04, 2.0, 3, 1, 6.0, 4.0);
-        check("unaffordable scale-up, target missed -> CONFLICT", o.guardedDecision == NO && o.status == Status.CONFLICT);
-        o = Policy.decide(DOWN, 1.0, 0.04, 2.0, 3, 1, 3.0, 4.0);
-        check("scale-down always passes through", o.guardedDecision == DOWN && o.status == Status.OK);
-        o = Policy.decide(NO, 2.5, 0.04, 2.0, 3, 1, 3.0, 4.0);
-        check("over paced budget -> remove one VM (BUDGET_RECOVERY)", o.guardedDecision == DOWN && o.status == Status.BUDGET_RECOVERY && !o.budgetOk);
-        o = Policy.decide(UP, 2.5, 0.04, 2.0, 3, 1, 6.0, 4.0);
-        check("over budget while target missed -> CONFLICT with scale-down", o.guardedDecision == DOWN && o.status == Status.CONFLICT);
-        o = Policy.decide(UP, 2.5, 0.04, 2.0, 1, 1, 6.0, 4.0);
-        check("over budget at minimum fleet -> INFEASIBLE, no action", o.guardedDecision == NO && o.status == Status.INFEASIBLE);
-        o = Policy.decide(NO, 1.0, 0.04, 2.0, 3, 1, 3.0, 4.0);
-        check("no-op passes through", o.guardedDecision == NO && o.status == Status.OK);
-
-        // explanations
-        GuardConfig cfg = new GuardConfig(2000, 4, 85);
-        DecisionRecord r = new DecisionRecord();
-        r.originalDecision = UP; r.delayTime = 1.4; r.responseTime = 4.6; r.activeVms = 3; r.committedUsd = 1.99; r.allowanceUsd = 2.0; r.priceUsd = 0.04;
-        Outcome oc = Policy.decide(UP, r.committedUsd, r.priceUsd, r.allowanceUsd, r.activeVms, 1, r.responseTime, cfg.targetRtSec);
-        r.guardedDecision = oc.guardedDecision; r.status = oc.status; r.budgetOk = oc.budgetOk; r.perfOk = oc.perfOk;
-        String e = explain(r, cfg, 1.0, 0.2, 1, true);
-        check("explanation names the trigger and original action", e.contains("1.400 s") && e.contains("SCALE_UP"));
-        check("explanation gives cost in INR", e.contains("₹172.55") && e.contains("₹170.00"));
-        check("explanation reports missed target and conflict", e.contains("misses the 4.00 s target") && e.contains("WARNING"));
-        check("analysis-only note appears in observe mode", explain(r, cfg, 1.0, 0.2, 1, false).contains("Analysis only"));
-        r.status = Status.INFEASIBLE; r.budgetOk = false; r.activeVms = 1;
-        check("infeasible explanation says no feasible configuration", explain(r, cfg, 1.0, 0.2, 1, true).contains("no feasible configuration"));
-
-        // parsing of the original simulator's end-of-run report (text copied from a real run)
-        String sample = "Total User requests : 567783.0\nCPU Utilization (%):35.799 Avg.   36.335 SD\nResponse Time (Sec.): 3.986 Avg.   4.464 SD\n"
-                + "Delay Time (Sec.): 1.989 Avg.   4.462 SD\nCloudlet Canceled: 68\nCloudlet Failured: 9264\nSLA Violation: 29.617%\nMax used Vms: 8\n"
-                + "Scale Up Decisions: 306\nScale Down Decisions: 304\nContradictory Scaling Decisions: 279\nProvisioned On-Demand Vm:306\n"
-                + "De-Provisioned On-Demand Vm:304\n\u001B[31mCOST:...\nRenting Cost: $ 29.84\nSLA Penalty: $ 11.24\nTotal Cost : $ \u001B[31m......   41.08    .......";
-        Map<String, Double> m = ConsoleParser.parse(sample);
-        check("parser reads renting / penalty / total cost", m.get("renting_cost_usd") == 29.84 && m.get("sla_penalty_usd") == 11.24 && m.get("total_cost_usd") == 41.08);
-        check("parser reads performance metrics", m.get("response_time_avg_s") == 3.986 && m.get("sla_violation_pct") == 29.617 && m.get("max_vms") == 8);
-        check("parser reads all 16 metrics", m.size() == ConsoleParser.PATTERNS.length);
-
-        // CSV round trip (explanations contain commas and quotes)
-        Path tmp = Files.createTempDirectory("bg");
-        Csv.write(tmp.resolve("t.csv"), Arrays.asList(new String[]{"a", "b"}, new String[]{"x, \"y\"", "₹1"}));
-        List<String[]> back = Csv.read(tmp.resolve("t.csv"));
-        check("CSV round trip keeps commas, quotes and the rupee sign", back.get(1)[0].equals("x, \"y\"") && back.get(1)[1].equals("₹1"));
-
-        // report generation from synthetic results
-        Comparison c = new Comparison();
-        c.cfg = cfg; c.dir = tmp;
-        c.original = fake("original", 29.84, 3.986); c.observe = fake("observe", 29.84, 3.986); c.guard = fake("guard", 20.0, 4.5);
-        c.observe.decisions.add(DECISION_HEADER); c.guard.decisions.add(DECISION_HEADER);
-        String[] row = {"600", "SATURDAY:00:10:00", "50", "1.2", "3.2", "2", "SCALE_UP", "DO_NOTHING", "true", "100", "120", "true", "true", "BUDGET_HOLD", "text, with comma"};
-        c.observe.decisions.add(row); c.guard.decisions.add(row);
-        Report.writeComparison(c);
-        String html = new String(Files.readAllBytes(tmp.resolve("report.html")), StandardCharsets.UTF_8);
-        check("report labels all three result types", html.contains("1. Original AutoScaleSim") && html.contains("2. Original, analysed by extension") && html.contains("3. Budget-guarded policy"));
-        check("report flags missed RT target under budget", html.contains("cannot both be satisfied"));
-        check("report includes explanation rows", html.contains("text, with comma") && html.contains("BUDGET_HOLD"));
-    }
-
-    static RunResult fake(String mode, double rentUsd, double rt) {
-        RunResult r = new RunResult();
-        r.mode = mode;
-        r.metrics.put("renting_cost_usd", rentUsd); r.metrics.put("sla_penalty_usd", 1.0); r.metrics.put("total_cost_usd", rentUsd + 1);
-        r.metrics.put("response_time_avg_s", rt); r.metrics.put("max_vms", 8.0);
-        r.hourlyVms = new double[]{2, 3, 4}; r.hourlyRt = new double[]{3, 4, 5};
-        return r;
-    }
-
-    static void integrationTests(Path dataDir, Path outDir) throws Exception {
-        System.out.println("Integration tests (runs real simulations, about 1-2 minutes)");
-        GuardConfig tight = new GuardConfig(1500, 4.0, DEFAULT_INR_PER_USD);
-        RunResult orig = runChild("original", tight, dataDir, outDir.resolve("original"), System.out);
-        RunResult obs = runChild("observe", tight, dataDir, outDir.resolve("observe"), System.out);
-        String[] csvs = {"Monitor_VmHistory.csv", "Monitor_SLAHistory.csv", "Monitor_EndUserHistory.csv"};
-        for (String f : csvs) {
-            Path committed = dataDir.resolve(f);
-            if (Files.exists(committed))
-                check("original run reproduces the authors' committed " + f, sameFile(committed, orig.dir.resolve("src/others/" + f)));
-            check("observe mode leaves " + f + " byte-identical to original", sameFile(orig.dir.resolve("src/others/" + f), obs.dir.resolve("src/others/" + f)));
-        }
-        check("observe mode summary metrics identical to original", orig.metrics.equals(obs.metrics));
-        check("one decision record per scaling interval (7 days / 10 min = 1008)", obs.decisions.size() - 1 == 1008);
-        double lastCommittedInr = Double.parseDouble(obs.decisions.get(obs.decisions.size() - 1)[9]);
-        double printedInr = orig.metrics.get("renting_cost_usd") * DEFAULT_INR_PER_USD;
-        check(String.format(Locale.ROOT, "extension's running cost estimate (₹%.2f) is consistent with the original's final renting cost (₹%.2f, within 2%%)", lastCommittedInr, printedInr),
-                Math.abs(lastCommittedInr - printedInr) <= 0.02 * printedInr);
-
-        GuardConfig huge = new GuardConfig(1e9, 1e9, DEFAULT_INR_PER_USD);
-        RunResult loose = runChild("guard", huge, dataDir, outDir.resolve("guard_unlimited"), System.out);
-        check("guard with unlimited budget changes nothing (identical VM history)", sameFile(orig.dir.resolve("src/others/Monitor_VmHistory.csv"), loose.dir.resolve("src/others/Monitor_VmHistory.csv")));
-
-        RunResult g = runChild("guard", tight, dataDir, outDir.resolve("guard_1500"), System.out);
-        double rc = g.metrics.get("renting_cost_usd") * DEFAULT_INR_PER_USD;
-        Map<String, Integer> cnt = countStatus(g.decisions);
-        check(String.format(Locale.ROOT, "guard keeps renting cost within ₹1500 budget (got ₹%.2f) or reports INFEASIBLE", rc), rc <= 1500 || cnt.getOrDefault("INFEASIBLE", 0) > 0);
-        check("guard executed the same workload (same total requests)", orig.metrics.get("total_requests").equals(g.metrics.get("total_requests")));
-    }
 
     /** Byte comparison that ignores '\r', because Git for Windows may check files out with CRLF line endings. */
     static boolean sameFile(Path a, Path b) throws IOException {
@@ -1165,7 +1071,8 @@ public final class BudgetGuard {
             case "run": {
                 String mode = o.getOrDefault("mode", "original");
                 if (mode.equals("original")) ExperimentalSetup.main(new String[0]);   // the authors' entry point, untouched
-                else if (mode.equals("observe") || mode.equals("guard")) runSetup(cfgFrom(o), mode.equals("guard"));
+                else if (mode.equals("observe") || mode.equals("guard"))
+                    runSetup(cfgFrom(o), mode.equals("guard"), readScenarioFile(Paths.get("scenario.properties")));
                 else throw new IllegalArgumentException("--mode must be original, observe or guard");
                 break;
             }
@@ -1181,22 +1088,38 @@ public final class BudgetGuard {
                         findDataDir(o), Paths.get(o.getOrDefault("out", "results/sweep_" + stamp)), System.out);
                 break;
             }
-            case "test":
-                unitTests();
-                if (o.containsKey("integration")) integrationTests(findDataDir(o), Paths.get(o.getOrDefault("out", "results/test_" + stamp)));
-                System.out.println("\n" + passed + " passed, " + failed + " failed");
-                if (failed > 0) System.exit(1);
+            case "samples":
+                writeSamples(findDataDir(o), Paths.get(o.getOrDefault("out", "samples")));
                 break;
+            case "analyse": {
+                Workload w = Workload.parse(Paths.get(o.get("csv")).getFileName().toString(),
+                        new String(Files.readAllBytes(Paths.get(o.get("csv"))), StandardCharsets.UTF_8));
+                Workload.Params p = new Workload.Params();
+                if (o.containsKey("k")) p.k = Double.parseDouble(o.get("k"));
+                System.out.println(Json.write(w.analyse(p).summary));
+                break;
+            }
+            case "simulate": {
+                Workload w = Workload.parse(Paths.get(o.get("csv")).getFileName().toString(),
+                        new String(Files.readAllBytes(Paths.get(o.get("csv"))), StandardCharsets.UTF_8));
+                List<RunResult> rs = simulateWorkload(w, cfgFrom(o), o.containsKey("guard"), findDataDir(o),
+                        Paths.get(o.getOrDefault("out", "results/workload_" + stamp)), System.out);
+                for (RunResult r : rs) System.out.println(r.mode + " " + Json.write(r.metrics));
+                break;
+            }
             case "serve":
-                serve(Integer.parseInt(o.getOrDefault("port", System.getenv().getOrDefault("PORT", "8080"))),
-                        findDataDir(o), Paths.get(o.getOrDefault("results", "results")).toAbsolutePath());
+                WebApp.main(Arrays.copyOfRange(a, 1, a.length));
+                Thread.currentThread().join();
                 break;
             default:
-                System.out.println("Usage: BudgetGuard <run|compare|sweep|test|serve> [options]\n"
-                        + "  compare --budget-inr 2000 --target-rt 4.0 [--inr-per-usd 85]\n"
-                        + "  sweep   --budgets 750,1000,1500,2000,2500,3000 --target-rt 4.0\n"
-                        + "  test    [--integration]\n"
-                        + "  serve   [--port 8080]");
+                System.out.println("Usage: BudgetGuard <command> [options]\n"
+                        + "  serve    [--port 8080] [--data-dir data]           web dashboard + API\n"
+                        + "  compare  --budget-inr 2000 --target-rt 4.0 [--inr-per-usd 85]\n"
+                        + "  sweep    --budgets 750,1000,1500,2000,2500,3000 --target-rt 4.0\n"
+                        + "  samples  [--out samples]                            regenerate sample workloads\n"
+                        + "  analyse  --csv file.csv [--k 2.5]                   forecast and spike analysis\n"
+                        + "  simulate --csv file.csv [--guard] [--budget-inr N]  replay a workload in AutoScaleSim\n"
+                        + "  run      --mode original|observe|guard              one simulation (internal)");
         }
     }
 }

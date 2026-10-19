@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AutoScaleSim Lab</title>
+<link rel="stylesheet" href="styles.css">
+<script src="vendor/chart.umd.min.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">
+      <h1>AutoScaleSim Lab</h1>
+      <span class="sub">Reproduction and extension of AutoScaleSim for budget-aware, explainable and predictive cloud auto-scaling</span>
+      <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle colour theme">Theme</button>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-page="overview" aria-selected="true">Overview</button>
+      <button role="tab" data-page="reproduce">1 · Reproduction</button>
+      <button role="tab" data-page="budget">2 · Budget guard</button>
+      <button role="tab" data-page="workload">3 · Workloads &amp; forecast</button>
+      <button role="tab" data-page="history">History</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+<!-- ============================== OVERVIEW ============================== -->
+<section class="page active" id="page-overview">
+  <h2>Project overview</h2>
+  <p class="lead" id="paperRef">Loading…</p>
+  <div class="kpis" id="overviewKpis"></div>
+  <div class="grid two">
+    <div class="card">
+      <h3>What is original and what is ours</h3>
+      <div class="scroll"><table>
+        <tr><th>Part</th><th>Author</th><th>Where</th></tr>
+        <tr><td>AutoScaleSim simulator (MAPE loop, rules, executors, cost model, NASA/Wikipedia traces)</td><td><span class="tag neutral">Original authors</span></td><td><code>src/</code> (unchanged)</td></tr>
+        <tr><td>Reproduction runner and output-identity checks</td><td><span class="tag good">This project</span></td><td><code>extension/</code></td></tr>
+        <tr><td>Budget-aware, explainable scaling (planner subclass, explanations, warnings)</td><td><span class="tag good">This project</span></td><td><code>BudgetGuard.java</code></td></tr>
+        <tr><td>Workload upload, Holt-Winters forecast, spike warnings, capacity &amp; cost</td><td><span class="tag good">This project</span></td><td><code>Workload.java</code></td></tr>
+        <tr><td>Web dashboard, API, database, Docker, AWS deployment</td><td><span class="tag good">This project</span></td><td><code>WebApp.java</code>, <code>web/</code>, <code>deploy/</code></td></tr>
+      </table></div>
+    </div>
+    <div class="card">
+      <h3>Architecture</h3>
+      <svg class="arch" viewBox="0 0 560 300" role="img" aria-label="Architecture: browser to Java web app, which runs AutoScaleSim simulations in child JVMs and stores results in the database">
+        <rect class="infra" x="6" y="6" width="548" height="288" rx="10"/>
+        <text x="18" y="26" class="sm">Docker container on AWS EC2 (or a laptop)</text>
+        <rect class="ext" x="20" y="44" width="150" height="56" rx="8"/><text x="34" y="68">Browser dashboard</text><text x="34" y="86" class="sm">HTML · JS · Chart.js</text>
+        <rect class="ext" x="220" y="44" width="160" height="56" rx="8"/><text x="234" y="68">Java web app + API</text><text x="234" y="86" class="sm">WebApp.java · job queue</text>
+        <rect class="ext" x="420" y="44" width="120" height="56" rx="8"/><text x="434" y="68">Database</text><text x="434" y="86" class="sm">SQLite / PostgreSQL</text>
+        <rect class="ext" x="220" y="140" width="160" height="56" rx="8"/><text x="234" y="164">Extension layer</text><text x="234" y="182" class="sm">BudgetGuard · Workload</text>
+        <rect class="orig" x="150" y="226" width="300" height="56" rx="8"/><text x="164" y="250">AutoScaleSim (original Java, unchanged)</text><text x="164" y="268" class="sm">CloudSim · Monitor · Analyzer · Planner · Executor</text>
+        <path d="M170 72 H220" marker-end="url(#arr)"/><path d="M380 72 H420" marker-end="url(#arr)"/>
+        <path d="M300 100 V140" marker-end="url(#arr)"/><path d="M300 196 V226" marker-end="url(#arr)"/>
+        <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10z" style="fill:var(--ink-2);stroke:none"/></marker></defs>
+      </svg>
+      <p class="hint">Each simulation runs in its own JVM: the original code keeps static state and reads/writes the relative folder <code>src/others/</code>.</p>
+    </div>
+  </div>
+  <div class="card">
+    <h3>How to demonstrate</h3>
+    <ol>
+      <li><b>Reproduction</b>: run the authors' unmodified NASA experiment and show the byte-identity check against the outputs they committed.</li>
+      <li><b>Budget guard</b>: set a budget (₹) and a response-time target, run original vs guarded, read the explanations and warnings.</li>
+      <li><b>Workloads &amp; forecast</b>: upload a CSV (or pick a sample), inspect forecast, spikes, warnings and capacity/cost, then replay it in AutoScaleSim.</li>
+      <li><b>History</b>: every run and upload is stored in the database and can be reopened.</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ============================== REPRODUCTION ============================== -->
+<section class="page" id="page-reproduce">
+  <h2>1 · Reproduction of the original experiment</h2>
+  <p class="lead">Runs the authors' <code>autoscalesim.ExperimentalSetup.main()</code> without changes (NASA trace, 7 days, SLA-aware rule, t2.medium) and compares the produced monitoring files with the ones the authors committed to their repository.</p>
+  <div class="card">
+    <form class="controls" id="reproForm">
+      <label class="field">Scenario
+        <select name="scenario">
+          <option value="nasa">NASA 7 days — authors' unmodified main()</option>
+          <option value="wikipedia">Wikipedia 4 hours — values documented in the authors' comments</option>
+        </select>
+      </label>
+      <button class="btn" type="submit">Run simulation</button>
+      <span class="hint">About 10 seconds.</span>
+    </form>
+    <div id="reproStatus"></div>
+  </div>
+  <div id="reproResult"></div>
+  <div class="card">
+    <h3>Comparison with the paper</h3>
+    <div id="paperCompare"></div>
+  </div>
+</section>
+
+<!-- ============================== BUDGET ============================== -->
+<section class="page" id="page-budget">
+  <h2>2 · Budget-aware, explainable auto-scaling</h2>
+  <p class="lead">The original planner decides first; the guard then checks the decision against a paced budget (the simulator's own billing rule: ceil(hours) × US$0.04 per t2.medium hour), explains it, and warns when the budget and the response-time target cannot both be met.</p>
+  <div class="card">
+    <form class="controls" id="budgetForm">
+      <label class="field">Budget for 7 simulated days (₹)<input type="number" name="budgetInr" value="2000" min="1" step="any" required></label>
+      <label class="field">Response-time target (s)<input type="number" name="targetRt" value="4" min="0.01" step="any" required></label>
+      <label class="field">Exchange rate (₹ per US$, assumption)<input type="number" name="inrPerUsd" value="85" min="0.01" step="any" required></label>
+      <button class="btn" type="submit">Run original vs guarded</button>
+      <span class="hint">Three real simulations, about 20 seconds.</span>
+    </form>
+    <div id="budgetStatus"></div>
+  </div>
+  <div id="budgetResult"></div>
+  <div class="card">
+    <div class="split"><h3>Budget sweep (evaluation)</h3></div>
+    <form class="controls" id="sweepForm">
+      <label class="field">Budgets (₹, comma-separated)<input name="budgets" value="1000,1500,2000,2500,3000" style="width:260px" required></label>
+      <label class="field">Response-time target (s)<input type="number" name="targetRt" value="4" min="0.01" step="any" required></label>
+      <button class="btn secondary" type="submit">Run sweep</button>
+      <span class="hint">One original run + one guarded run per budget.</span>
+    </form>
+    <div id="sweepStatus"></div>
+    <div id="sweepResult"></div>
+  </div>
+</section>
+
+<!-- ============================== WORKLOAD ============================== -->
+<section class="page" id="page-workload">
+  <h2>3 · Custom workloads and predictive spike warnings</h2>
+  <p class="lead">Upload per-minute request counts (<code>minute,requests</code>) or a request log (<code>timestamp</code> column). The forecast is Holt-Winters exponential smoothing with a daily season, chosen by grid search; spikes are buckets above the trailing 2-hour mean + k·σ; warnings fire when the forecast's upper bound crosses that threshold ahead of time.</p>
+  <div class="grid two">
+    <div class="card">
+      <h3>Upload a workload CSV</h3>
+      <form class="controls" id="uploadForm">
+        <input type="file" id="uploadFile" accept=".csv,text/csv" required>
+        <button class="btn" type="submit">Upload</button>
+      </form>
+      <p class="hint">Limits: 120 minutes to 7 days, at most 2000 requests per minute, 20 MB. Stored in the database.</p>
+      <div id="uploadStatus"></div>
+    </div>
+    <div class="card">
+      <h3>Analyse</h3>
+      <form class="controls" id="analyseForm">
+        <label class="field">Workload<select name="workloadId" id="workloadSelect" style="max-width:300px"></select></label>
+        <label class="field">Spike sensitivity k<input type="number" name="k" value="2.5" min="1" max="6" step="0.1"></label>
+        <label class="field">Warning lead (min)<select name="lead"><option value="1">10</option><option value="2">20</option><option value="3" selected>30</option><option value="6">60</option></select></label>
+        <label class="field">Target CPU utilisation<input type="number" name="util" value="0.7" min="0.2" max="1" step="0.05"></label>
+        <button class="btn" type="submit">Analyse</button>
+      </form>
+    </div>
+  </div>
+  <div id="analysisResult"></div>
+</section>
+
+<!-- ============================== HISTORY ============================== -->
+<section class="page" id="page-history">
+  <h2>History</h2>
+  <p class="lead">Every simulation run and uploaded workload, read from the database.</p>
+  <div class="card"><h3>Simulation runs</h3><div class="scroll" id="runsTable"></div></div>
+  <div class="card"><h3>Uploaded workloads</h3><div class="scroll" id="workloadsTable"></div></div>
+  <div id="historyRun"></div>
+</section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
