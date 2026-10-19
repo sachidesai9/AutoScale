@@ -108,9 +108,12 @@ Resources:
           #!/bin/bash
           exec > >(tee /var/log/autoscalesim-setup.log) 2>&1
           set -euxo pipefail
-          fail() { /opt/aws/bin/cfn-signal -e 1 --reason "$1" --stack ${AWS::StackName} --resource AppInstance --region ${AWS::Region}; exit 1; }
+          # cfn-signal tells CloudFormation whether the site came up; install it first (package, else AWS's pip package)
+          dnf install -y aws-cfn-bootstrap || { dnf install -y python3-pip && pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz; }
+          SIGNAL=$(command -v cfn-signal || echo /opt/aws/bin/cfn-signal)
+          fail() { "$SIGNAL" -e 1 --reason "$1" --stack ${AWS::StackName} --resource AppInstance --region ${AWS::Region}; exit 1; }
           trap 'fail "setup script failed at line $LINENO; see /var/log/autoscalesim-setup.log"' ERR
-          dnf install -y docker git aws-cfn-bootstrap
+          dnf install -y docker git
           systemctl enable --now docker
           if [ ! -f /swapfile ]; then
             fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile
@@ -126,7 +129,7 @@ Resources:
             -e SIM_HEAP=${SimHeap} -v autoscalesim-data:/data autoscalesim-lab:latest
           for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1/api/health | grep -q '"status":"ok"'; then
-              /opt/aws/bin/cfn-signal -e 0 --stack ${AWS::StackName} --resource AppInstance --region ${AWS::Region}
+              "$SIGNAL" -e 0 --stack ${AWS::StackName} --resource AppInstance --region ${AWS::Region}
               exit 0
             fi
             sleep 5

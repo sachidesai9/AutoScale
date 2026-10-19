@@ -27,6 +27,30 @@ The CloudFormation template `deploy/aws/autoscalesim-lab.yaml` creates:
 
 The instance has a **CreationPolicy**: the stack only reaches `CREATE_COMPLETE` when the startup script has received `{"status":"ok"}` from `/api/health`. If the build or the app fails, the stack rolls back and shows the reason. A green stack therefore means the website was verified to be running.
 
+## C0. Fastest: AWS CloudShell (about 10 minutes, nothing to install)
+
+1. Sign in to the AWS Console and switch the region at the top right to **Asia Pacific (Sydney) ap-southeast-2**.
+2. Click the **CloudShell** icon (`>_`) in the top bar and wait for the prompt.
+3. Paste the following, replacing `you@example.com` with your e-mail for the cost alert:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/sachidesai9/autoscale/main/deploy/aws/autoscalesim-lab.yaml
+aws cloudformation deploy --region ap-southeast-2 --stack-name autoscalesim-lab \
+  --template-file autoscalesim-lab.yaml --capabilities CAPABILITY_IAM \
+  --parameter-overrides RepoUrl=https://github.com/sachidesai9/autoscale.git Branch=main AlertEmail=you@example.com
+aws cloudformation describe-stacks --region ap-southeast-2 --stack-name autoscalesim-lab \
+  --query "Stacks[0].[StackStatus,Outputs]" --output table
+```
+
+The `deploy` command waits until the stack is complete (usually 5–10 minutes) and prints `Successfully created/updated stack`. The last command shows `CREATE_COMPLETE` and the **WebsiteURL**. Open it in your browser, and accept the AWS Budgets confirmation e-mail.
+
+If `deploy` reports a failure, run this to see the reason:
+
+```bash
+aws cloudformation describe-stack-events --region ap-southeast-2 --stack-name autoscalesim-lab \
+  --query "StackEvents[?contains(ResourceStatus,'FAILED')].[LogicalResourceId,ResourceStatusReason]" --output table
+```
+
 ## C1. Deploy from the AWS Console (no command line)
 
 Prerequisites:
