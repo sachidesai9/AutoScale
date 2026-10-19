@@ -10,7 +10,7 @@
   const num = (v, d = 2) => (v == null || isNaN(v)) ? '–' : Number(v).toLocaleString('en-IN', { minimumFractionDigits: d, maximumFractionDigits: d });
   const int = (v) => (v == null || isNaN(v)) ? '–' : Math.round(v).toLocaleString('en-IN');
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  const state = { info: null, charts: {}, rate: 85, workloads: [] };
+  const state = { info: null, charts: {}, rate: 85, workloads: [], busy: false };
 
   async function api(path, opts) {
     const r = await fetch(path, opts);
@@ -104,21 +104,25 @@
   }
 
   // ------------------------------------------------------------------ jobs
+  // One simulation at a time from this page: the lock is taken on the click itself, before the request is sent,
+  // so a double-click cannot submit twice. Buttons rendered later (e.g. the replay form) also check the flag.
   async function runJob(params, statusEl, onDone) {
-    const btns = $$('button.btn');
+    if (state.busy) return;
+    state.busy = true;
+    const lockButtons = (on) => $$('button.btn').forEach((b) => (b.disabled = on));
+    lockButtons(true);
     statusEl.innerHTML = `<pre class="log"><span class="spinner"></span> Submitting…</pre>`;
     let sub;
     try {
       sub = await api('/api/runs', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(params) });
-    } catch (e) { statusEl.innerHTML = notice('bad', esc(e.message)); return; }
-    btns.forEach((b) => (b.disabled = true));
+    } catch (e) { statusEl.innerHTML = notice('bad', esc(e.message)); state.busy = false; lockButtons(false); return; }
     const t0 = Date.now();
     const poll = async () => {
       let run;
-      try { run = await api('/api/runs/' + sub.id); } catch (e) { statusEl.innerHTML = notice('bad', esc(e.message)); btns.forEach((b) => (b.disabled = false)); return; }
+      try { run = await api('/api/runs/' + sub.id); } catch (e) { statusEl.innerHTML = notice('bad', esc(e.message)); state.busy = false; lockButtons(false); return; }
       const secs = Math.round((Date.now() - t0) / 1000);
       if (run.status === 'done' || run.status === 'failed') {
-        btns.forEach((b) => (b.disabled = false));
+        state.busy = false; lockButtons(false);
         statusEl.innerHTML = run.status === 'done'
           ? `<p class="hint">Run <code>${esc(run.id)}</code> finished in ${secs} s and was saved to the database.</p>`
           : notice('bad', 'Run failed: ' + esc(run.error)) + `<pre class="log">${esc(run.log)}</pre>`;
@@ -190,7 +194,13 @@
     const el = $('#paperCompare');
     try {
       const p = await (await fetch('paper_results.json')).json();
-      if (!p.values || !p.values.length) { el.innerHTML = notice('warn', esc(p.note)); return; }
+      if (!p.values || !p.values.length) {
+        el.innerHTML = notice('info', '<b>The paper\'s reported values have not been added to this page yet.</b> The reproduction is checked directly against the authors\' own artefacts instead:')
+          + '<ul><li>The authors\' source code in <code>src/</code> is used unchanged (identical to their GitHub repository).</li>'
+          + '<li>Running their <code>ExperimentalSetup.main()</code> produces monitoring files that are <b>byte-identical</b> to the output files the authors committed (run the NASA reproduction above to see the check).</li>'
+          + '<li>Headline values of that run: 567,783 requests, average response time 3.986 s, SLA violation 29.617 %, max 8 VMs, renting cost US$29.84.</li></ul>';
+        return;
+      }
       let h = `<p class="hint">${esc(p.source)}</p><div class="scroll"><table><tr><th>Metric</th><th class="n">Paper</th><th class="n">This reproduction</th><th>Note</th></tr>`;
       p.values.forEach((v) => { h += `<tr><td>${esc(v.metric)}</td><td class="n">${esc(v.paper)}</td><td class="n">${esc(v.reproduced)}</td><td>${esc(v.note || '')}</td></tr>`; });
       el.innerHTML = h + '</table></div>';
@@ -340,9 +350,12 @@
     const el = $('#analysisResult');
     if (!f.workloadId) { el.innerHTML = notice('warn', 'Upload or choose a workload first.'); return; }
     el.innerHTML = '<div class="card"><span class="spinner"></span> Forecasting…</div>';
+    // only the most recent request may render: an older, slower analysis must not overwrite a newer one
+    const seq = (state.analysisSeq = (state.analysisSeq || 0) + 1);
     let a;
     try { a = await api(`/api/workloads/${f.workloadId}/analysis?k=${f.k}&lead=${f.lead}&util=${f.util}&inrPerUsd=${state.rate}`); }
-    catch (err) { el.innerHTML = notice('bad', esc(err.message)); return; }
+    catch (err) { if (seq === state.analysisSeq) el.innerHTML = notice('bad', esc(err.message)); return; }
+    if (seq !== state.analysisSeq) return;
     const s = a.summary, bm = a.bucketMinutes;
     const beatsNaive = s.mae_model < s.mae_naive_last_value;
     const futureSpikes = s.future_spike_buckets;
@@ -376,7 +389,7 @@
         <label class="field"><span><input type="checkbox" name="guard" value="true"> also run the budget guard</span></label>
         <label class="field">Budget (₹)<input type="number" name="budgetInr" value="2000" min="1" step="any"></label>
         <label class="field">RT target (s)<input type="number" name="targetRt" value="4" min="0.01" step="any"></label>
-        <button class="btn" type="submit">Run simulation</button></form>
+        <button class="btn" type="submit"${state.busy ? ' disabled' : ''}>Run simulation</button></form>
         <p class="hint">Per-minute counts are replayed by the original emulator with arrival seconds drawn uniformly at random (fixed seed). Validation on NASA week 1: average response time 5.10 s vs 3.99 s with the original intra-minute arrivals, so treat replays as indicative.</p>
         <div id="wlRunStatus"></div><div id="wlRunResult"></div></div>`;
     el.innerHTML = h;

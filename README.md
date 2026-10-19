@@ -18,7 +18,7 @@ The authors' Java sources in `src/` are **unchanged** (check with `git diff 9a0f
 | 3. Workload upload, forecasting, spike warnings, capacity and cost | This project | `Workload.java` |
 | Web dashboard, JSON API, database | This project | `WebApp.java`, `Store.java`, `extension/web/` |
 | Docker image, AWS CloudFormation deployment | This project | `Dockerfile`, `docker-compose.yml`, `deploy/aws/` |
-| JUnit 5 tests (46) | This project | `extension/test/` |
+| JUnit 5 tests (54) | This project | `extension/test/` |
 
 ## Quick start (Windows, for the demo)
 
@@ -81,7 +81,7 @@ Three result types are always shown side by side:
 
 - **Upload** a CSV, either per-minute counts (`minute,requests`) or a request log (one `timestamp` per row). Limits: 120 minutes to 7 days, at most 2000 requests per minute.
 - **Replay** in AutoScaleSim: the CSV is converted to the exact `Dataset_NASA_July.tset` format, so the unmodified emulator replays it. Arrival seconds inside each minute are drawn uniformly at random (fixed seed) to match the measured trace.
-- **Forecast**: Holt-Winters additive smoothing with a damped trend and a daily season, on 10-minute buckets. Parameters are chosen by grid search and compared with last-value and seasonal-naive baselines.
+- **Forecast**: Holt-Winters additive smoothing with a damped trend and a daily season, on 10-minute buckets. Parameters are chosen by grid search and compared with last-value and seasonal-naive baselines. The fit is burst-robust: one-off bursts of up to 1 hour are excluded from the trend and daily season (and an ongoing burst fades at a fitted rate), so a single spike cannot inflate future forecasts.
 - **Spikes and warnings**: a bucket is a spike when it is above the trailing 2-hour mean + k·σ. A warning fires when the forecast's 90 % upper bound crosses that threshold ahead of time, and the warnings are backtested for precision and recall.
 - **Capacity and cost**: one t2.medium completes 30 requests per minute at 100 % CPU (from the simulator's MIPS, PEs and request length). Required VMs are based on a 70 % target utilisation, and cost uses the simulator's US$0.04 per hour price.
 
@@ -102,7 +102,7 @@ scripts/test.sh all          # Windows: scripts\test.ps1 all   (unit + integrati
 scripts/test.sh unit         # fast tests only
 ```
 
-Last verified run: **46 tests, 46 passed** (including PostgreSQL 16 when `TEST_POSTGRES_URL` is set, and integration tests that run real simulations).
+Last verified run: **54 tests, 54 passed** (including PostgreSQL 16 when `TEST_POSTGRES_URL` is set, and integration tests that run real simulations).
 
 ## Database
 

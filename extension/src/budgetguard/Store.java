@@ -181,6 +181,21 @@ public final class Store implements AutoCloseable {
         return ((Number) query("SELECT COUNT(*) AS n FROM " + table).get(0).get("n")).longValue();
     }
 
+    // ---------------------------------------------------------------- housekeeping (used by the "history" command)
+
+    public synchronized boolean deleteWorkload(String id) throws SQLException {
+        return update("DELETE FROM workloads WHERE id = ?", id) > 0;
+    }
+
+    /** Deletes a run and its metrics; returns its result folder (or null) so the caller can remove the files. */
+    public synchronized String deleteRun(String id) throws SQLException {
+        Map<String, Object> r = getRun(id);
+        if (r == null) return null;
+        update("DELETE FROM run_metrics WHERE run_id = ?", id);
+        update("DELETE FROM runs WHERE id = ?", id);
+        return r.get("result_dir") == null ? "" : (String) r.get("result_dir");
+    }
+
     // ---------------------------------------------------------------- helpers
 
     int update(String sql, Object... args) throws SQLException {

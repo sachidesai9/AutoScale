@@ -1,6 +1,6 @@
 {
   "status": "pending",
   "source": "",
-  "note": "The paper's PDF could not be downloaded from the build environment (network policy), so its reported numbers have not been transcribed and no paper-vs-reproduction values are shown here. The reproduction is verified instead against the monitoring files the authors committed to their repository (byte-identical). Add the paper's values to extension/web/paper_results.json to fill this table.",
+  "note": "The values reported in the paper have not been added yet. How to add them: copy the paper's numbers for the NASA experiment into \"values\" below, e.g. {\"metric\": \"Average response time (s)\", \"paper\": \"…\", \"reproduced\": \"3.986\", \"note\": \"Table N\"}, and put the table or figure reference in \"source\".",
   "values": []
 }

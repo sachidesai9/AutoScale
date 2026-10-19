@@ -33,6 +33,9 @@ public final class WebApp {
 
     static final int MAX_BODY = 20 * 1024 * 1024;
     static final int MAX_QUEUED = 3;
+    static final long DUPLICATE_WINDOW_MS = 5000;
+    String lastParams, lastRunId;
+    long lastSubmitMillis;
 
     final Store store;
     final Path dataDir;       // AutoScaleSim src/others (datasets and committed outputs)
@@ -224,7 +227,20 @@ public final class WebApp {
         if (kind.equals("reproduce")) params.put("scenario", scenario);
         if (kind.equals("workload")) { params.put("workloadId", workloadId); params.put("guard", guard); }
         if (budgets != null) params.put("budgets", budgets);
-        store.createRun(id, kind, Json.write(params), workloadId);
+        // an identical request within a few seconds (double-click, repeated submit) returns the run already queued
+        String paramsJson = Json.write(params);
+        synchronized (this) {
+            if (paramsJson.equals(lastParams) && System.currentTimeMillis() - lastSubmitMillis < DUPLICATE_WINDOW_MS) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("id", lastRunId);
+                m.put("status", "duplicate");
+                return m;
+            }
+            lastParams = paramsJson;
+            lastRunId = id;
+            lastSubmitMillis = System.currentTimeMillis();
+        }
+        store.createRun(id, kind, paramsJson, workloadId);
         StringBuffer log = new StringBuffer();
         logs.put(id, log);
         pending.incrementAndGet();

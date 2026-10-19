@@ -1,0 +1,93 @@
+  running original simulation (NASA default (ExperimentalSetup.main)) ...
+  original finished in 5 s
+  running observe simulation (NASA default (ExperimentalSetup.main)) ...
+  observe finished in 5 s
+  running observe simulation (Wikipedia (values documented in ExperimentalSetup comments)) ...
+  observe finished in 15 s
+  running observe simulation (NASA default (ExperimentalSetup.main)) ...
+  observe finished in 4 s
+  running guard simulation (NASA default (ExperimentalSetup.main)) ...
+  guard finished in 5 s
+  running observe simulation (Uploaded workload: flash) ...
+  observe finished in 2 s
+  running guard simulation (NASA default (ExperimentalSetup.main)) ...
+  guard finished in 6 s
+Deleted run r2
+Deleted run r1
+?
+?? JUnit Platform Suite ?
+?? JUnit Jupiter ?
+?  ?? BudgetGuardTest ?
+?  ?  ?? reportGeneration(Path) ?
+?  ?  ?? pacing() ?
+?  ?  ?? scenarioDefaultsMatchAuthorsMain() ?
+?  ?  ?? formNumbersValidated() ?
+?  ?  ?? csvRoundTrip(Path) ?
+?  ?  ?? invalidBudgetsRejected() ?
+?  ?  ?? explanationsUseRecordedNumbers() ?
+?  ?  ?? explanationsForResourceAwareRule() ?
+?  ?  ?? originalModeRefusesNonDefaultScenarios(Path) ?
+?  ?  ?? billingMatchesOriginalCeilRule() ?
+?  ?  ?? budgetConvertedToUsd() ?
+?  ?  ?? jsonWriter() ?
+?  ?  ?? decisionRule() ?
+?  ?  ?? invalidTargetAndRateRejected() ?
+?  ?  ?? validConfigAccepted() ?
+?  ?  ?? parsesOriginalEndOfRunReport() ?
+?  ?? IntegrationTest ?
+?  ?  ?? costEstimateConsistentWithOriginalBill() ?
+?  ?  ?? wikipediaScenarioRuns() 15252 ms ?
+?  ?  ?? observeModeDoesNotChangeTheSimulation() ?
+?  ?  ?? workloadPipelineIsExactForTheOriginalTrace() ?
+?  ?  ?? originalReproducesAuthorsCommittedOutputs() ?
+?  ?  ?? unlimitedBudgetChangesNothing() ?
+?  ?  ?? uploadedWorkloadIsReplayedCompletely() ?
+?  ?  ?? tightBudgetIsEnforced() ?
+?  ?? WorkloadTest ?
+?  ?  ?? capacityComesFromSimulatorConstants() ?
+?  ?  ?? shortUploadsAreAnalysed() ?
+?  ?  ?? tsetIsDeterministic(Path) ?
+?  ?  ?? sustainedIncreaseIsFollowed() ?
+?  ?  ?? oneOffBurstDoesNotCreateFutureSpikes() ?
+?  ?  ?? parsesRequestLogWithIsoAndEpochTimestamps() ?
+?  ?  ?? seasonalForecastBeatsNaiveOnDailyPattern() ?
+?  ?  ?? tsetHasOriginalLayoutAndCounts(Path) ?
+?  ?  ?? futureHorizonNeverLongerThanHistory() ?
+?  ?  ?? longLeadIsReducedNotRejectedOnShortFiles() ?
+?  ?  ?? flatTrafficHasNoFutureSpikes() ?
+?  ?  ?? detectsInjectedSpike() ?
+?  ?  ?? requiredVmsFollowDemand() ?
+?  ?  ?? parsesPerMinuteCounts() ?
+?  ?  ?? rejectsBadInput() ?
+?  ?  ?? paramsValidated() ?
+?  ?  ?? oneOffBurstOnMultiDayDataIsNotRepeatedNextDay() ?
+?  ?  ?? acceptsAlternativeHeadersAndSemicolons() ?
+?  ?  ?? roundsFractionalCountsWithNote() ?
+?  ?? StoreAndWebTest ?
+?     ?? sqliteStore() ?
+?     ?? postgresStore() ?
+?     ?? historyCommandDeletesOnlyInsideItsOwnResultsFolder() ?
+?     ?? uploadAnalyseAndDownload() ?
+?     ?? servesDashboard() ?
+?     ?? healthAndInfo() ?
+?     ?? rejectsInvalidUploadsAndParameters() ?
+?     ?? duplicateSubmissionReturnsTheSameRun() ?
+?     ?? blocksPathTraversalAndUnknownPaths() ?
+?     ?? runsListIsJson() ?
+?     ?? seedsSampleWorkloadsWhenEmpty() ?
+?? JUnit Vintage ?
+
+Test run finished after 47521 ms
+[         7 containers found      ]
+[         0 containers skipped    ]
+[         7 containers started    ]
+[         0 containers aborted    ]
+[         7 containers successful ]
+[         0 containers failed     ]
+[        54 tests found           ]
+[         0 tests skipped         ]
+[        54 tests started         ]
+[         0 tests aborted         ]
+[        54 tests successful      ]
+[         0 tests failed          ]
+

@@ -244,12 +244,12 @@ public final class Workload {
     }
 
     public static final class Model {
-        public double alpha, beta, gamma, phi = 0.98;
+        public double alpha, beta, gamma, phi = 0.98, rho = 1;
         public int season;     // 0 = no season
         public String describe() {
             return season > 0
-                    ? String.format(Locale.ROOT, "Holt-Winters additive, damped trend (alpha=%.2f, beta=%.2f, gamma=%.2f, phi=%.2f, season=%d buckets)", alpha, beta, gamma, phi, season)
-                    : String.format(Locale.ROOT, "Damped Holt (alpha=%.2f, beta=%.2f, phi=%.2f); less than two days of data, so no daily season", alpha, beta, phi);
+                    ? String.format(Locale.ROOT, "Holt-Winters additive, damped trend, burst-robust (alpha=%.2f, beta=%.2f, gamma=%.2f, phi=%.2f, rho=%.1f, season=%d buckets)", alpha, beta, gamma, phi, rho, season)
+                    : String.format(Locale.ROOT, "Damped Holt, burst-robust (alpha=%.2f, beta=%.2f, phi=%.2f, rho=%.1f); less than two days of data, so no daily season", alpha, beta, phi, rho);
         }
     }
 
@@ -281,46 +281,52 @@ public final class Workload {
     }
 
     /** h-step-ahead forecasts made at every point t (index t+h), for a given model. Also returns final state forecasts. */
-    static double[][] run(double[] x, Model m, int h, int future) {
+    /**
+     * h-step-ahead forecasts made at every point t (stored at index t+h) and the forecasts beyond the data.
+     * x is the observed series; xc the same series with one-off bursts replaced (see analyse). The trend and the
+     * daily season are learned from xc only, so a finished burst cannot leave a lasting rise or come back the next
+     * day. Two levels are tracked: one on xc and one on x; the gap between them (an ongoing burst) is assumed to
+     * fade by a factor rho per bucket ahead. rho = 0 ignores bursts, rho = 1 follows the raw level.
+     */
+    static double[][] run(double[] x, double[] xc, Model m, int h, int future) {
         int n = x.length, s = m.season;
         double[] fc = new double[n];
         Arrays.fill(fc, Double.NaN);
-        double level, trend;
+        double level, levelC, trend;
         double[] seas = new double[Math.max(1, s)];
         int start;
         if (s > 0) {
             double m1 = 0, m2 = 0;
-            for (int i = 0; i < s; i++) { m1 += x[i]; m2 += x[i + s]; }
+            for (int i = 0; i < s; i++) { m1 += xc[i]; m2 += xc[i + s]; }
             m1 /= s; m2 /= s;
-            level = m1;
+            level = levelC = m1;
             trend = (m2 - m1) / s;
-            for (int i = 0; i < s; i++) seas[i] = x[i] - m1;
+            for (int i = 0; i < s; i++) seas[i] = xc[i] - m1;
             start = s;
         } else {
-            level = x[0];
-            trend = n > 1 ? x[1] - x[0] : 0;
+            level = levelC = xc[0];
+            trend = n > 1 ? xc[1] - xc[0] : 0;
             start = 1;
         }
-        // forecasts for t+h issued at t, for t >= start-1
         for (int t = start; t < n; t++) {
-            // forecast made at time t-1 for t-1+h
-            int target = t - 1 + h;
-            if (target < n) fc[target] = Math.max(0, forecast(level, trend, seas, s, t - 1, h, m.phi));
+            int target = t - 1 + h;                                  // forecast made at time t-1 for t-1+h
+            if (target < n) fc[target] = Math.max(0, forecast(level, levelC, trend, seas, s, t - 1, h, m));
             double si = s > 0 ? seas[t % s] : 0;
-            double prevLevel = level;
+            double prevC = levelC;
             level = m.alpha * (x[t] - si) + (1 - m.alpha) * (level + m.phi * trend);
-            trend = m.beta * (level - prevLevel) + (1 - m.beta) * m.phi * trend;
-            if (s > 0) seas[t % s] = m.gamma * (x[t] - level) + (1 - m.gamma) * si;
+            levelC = m.alpha * (xc[t] - si) + (1 - m.alpha) * (levelC + m.phi * trend);
+            trend = m.beta * (levelC - prevC) + (1 - m.beta) * m.phi * trend;
+            if (s > 0) seas[t % s] = m.gamma * (xc[t] - levelC) + (1 - m.gamma) * si;
         }
         double[] fut = new double[future];
-        for (int k = 1; k <= future; k++) fut[k - 1] = Math.max(0, forecast(level, trend, seas, s, n - 1, k, m.phi));
+        for (int k = 1; k <= future; k++) fut[k - 1] = Math.max(0, forecast(level, levelC, trend, seas, s, n - 1, k, m));
         return new double[][]{fc, fut};
     }
 
-    static double forecast(double level, double trend, double[] seas, int s, int t, int h, double phi) {
+    static double forecast(double level, double levelC, double trend, double[] seas, int s, int t, int h, Model m) {
         double damp = 0, p = 1;
-        for (int i = 1; i <= h; i++) { p *= phi; damp += p; }
-        return level + damp * trend + (s > 0 ? seas[(t + h) % s] : 0);
+        for (int i = 1; i <= h; i++) { p *= m.phi; damp += p; }
+        return levelC + (level - levelC) * Math.pow(m.rho, h) + damp * trend + (s > 0 ? seas[(t + h) % s] : 0);
     }
 
     static double mae(double[] a, double[] f, int from) {
@@ -329,15 +335,16 @@ public final class Workload {
         return c == 0 ? Double.NaN : s / c;
     }
 
-    static Model fit(double[] x, int h, int season) {
+    static Model fit(double[] x, double[] xc, int h, int season, int minFrom) {
         double[] alphas = {0.1, 0.2, 0.4, 0.6, 0.8}, betas = {0.0, 0.02, 0.1}, gammas = season > 0 ? new double[]{0.05, 0.15, 0.3} : new double[]{0};
+        double[] rhos = {0, 0.5, 0.8, 1};
         Model best = null;
         double bestErr = Double.MAX_VALUE;
-        int from = season > 0 ? 2 * season : Math.min(x.length - 1, 12);
-        for (double a : alphas) for (double b : betas) for (double g : gammas) {
+        int from = season > 0 ? 2 * season : Math.min(x.length - 1, Math.max(minFrom, 3));
+        for (double a : alphas) for (double b : betas) for (double g : gammas) for (double r : rhos) {
             Model m = new Model();
-            m.alpha = a; m.beta = b; m.gamma = g; m.season = season;
-            double err = mae(x, run(x, m, h, 0)[0], from);
+            m.alpha = a; m.beta = b; m.gamma = g; m.rho = r; m.season = season;
+            double err = mae(x, run(x, xc, m, h, 0)[0], from);          // judged against the real data
             if (err < bestErr) { bestErr = err; best = m; }
         }
         return best;
@@ -348,17 +355,21 @@ public final class Workload {
         Analysis a = new Analysis();
         a.p = p;
         double[] x = bucketize(perMinute, p.bucketMin);
-        int n = x.length, h = p.leadBuckets, W = p.windowBuckets;
-        if (n < W + h + 2) throw new IllegalArgumentException("Workload too short for this bucket size and window");
+        int n = x.length;
+        List<String> notes = new ArrayList<>();
+        // Short uploads: shrink the spike window and, only if needed, the warning lead, and say so.
+        int W = Math.min(p.windowBuckets, Math.max(3, n / 4));
+        if (n < W + 1 + 4)
+            throw new IllegalArgumentException("Too little data for " + p.bucketMin + "-minute buckets: need at least " + (W + 5) * p.bucketMin + " minutes");
+        int h = Math.min(p.leadBuckets, n - W - 4);
+        if (W < p.windowBuckets)
+            notes.add("Short workload: the spike window was reduced from " + p.windowBuckets * p.bucketMin + " to " + W * p.bucketMin + " minutes.");
+        if (h < p.leadBuckets)
+            notes.add("Short workload: the warning lead was reduced from " + p.leadBuckets * p.bucketMin + " to " + h * p.bucketMin + " minutes.");
         int perDay = 1440 / p.bucketMin;
         int season = (1440 % p.bucketMin == 0 && n >= 2 * perDay + h) ? perDay : 0;
-        a.model = fit(x, h, season);
-        double[][] r = run(x, a.model, h, p.futureBuckets);
-        a.bucketRate = x;
-        a.fcHstep = r[0];
-        a.futureRate = r[1];
 
-        // spike thresholds from the trailing window
+        // spike thresholds from the trailing window (on the observed data)
         a.threshold = new double[n];
         a.spike = new boolean[n];
         Arrays.fill(a.threshold, Double.NaN);
@@ -366,6 +377,29 @@ public final class Workload {
             a.threshold[t] = threshold(x, t - W, t, p.k);
             a.spike[t] = x[t] > a.threshold[t] && x[t] >= 1.2 * meanOf(x, t - W, t);
         }
+
+        // Robust fitting: isolated bursts of up to MAX_BURST_MINUTES are replaced by the preceding window's mean
+        // before the model is fitted, so a one-off burst does not pull the level, trend or daily season upwards.
+        // Longer runs are kept: they are genuine level changes. Errors are still measured against the real data.
+        double[] xc = x.clone();
+        int maxRun = Math.max(1, MAX_BURST_MINUTES / p.bucketMin), cleaned = 0;
+        for (int t = W; t < n; ) {
+            if (!a.spike[t]) { t++; continue; }
+            int end = t;
+            while (end < n && a.spike[end]) end++;
+            if (end - t <= maxRun) {
+                double base = meanOf(x, t - W, t);
+                for (int i = t; i < end; i++) { xc[i] = base; cleaned++; }
+            }
+            t = end;
+        }
+        if (cleaned > 0)
+            notes.add(cleaned + " burst bucket(s) of at most " + MAX_BURST_MINUTES + " minutes were treated as one-off outliers when fitting the forecast.");
+        a.model = fit(x, xc, h, season, W);
+        double[][] r = run(x, xc, a.model, h, p.futureBuckets);
+        a.bucketRate = x;
+        a.fcHstep = r[0];
+        a.futureRate = r[1];
 
         // warnings: forecast issued at t-h for t, compared with the threshold known at t-h
         a.upper = new double[n];
@@ -376,7 +410,7 @@ public final class Workload {
         for (int t = 0; t < n; t++) {
             if (Double.isNaN(a.fcHstep[t])) continue;
             int issued = t - h;
-            double sd = errs.size() >= 10 ? std(errs) : Double.NaN;
+            double sd = errs.size() >= MIN_ERRORS ? robustStd(errs) : Double.NaN;
             if (!Double.isNaN(sd) && issued >= W) {
                 a.upper[t] = a.fcHstep[t] + 1.645 * sd;
                 double thrAtIssue = a.threshold[issued];
@@ -410,10 +444,12 @@ public final class Workload {
         a.futureUpper = new double[fut];
         a.futureVms = new int[fut];
         a.futureSpike = new boolean[fut];
-        double sdH = errs.size() >= 10 ? std(errs) : 0;           // std of h-step errors
+        double sdH = errs.size() >= MIN_ERRORS ? robustStd(errs) : 0;   // robust spread of h-step errors
         double[] sorted = x.clone();
         Arrays.sort(sorted);
-        a.futureThreshold = sorted[(int) Math.floor(0.95 * (n - 1))];   // 95th percentile of observed demand
+        // a predicted spike must exceed the 95th percentile of observed demand AND be at least 1.2 x its median,
+        // so ordinary noise on flat traffic is never reported as a spike
+        a.futureThreshold = Math.max(sorted[(int) Math.floor(0.95 * (n - 1))], 1.2 * median(x));
         for (int i = 0; i < fut; i++) {
             double widen = Math.min(2.5, Math.sqrt(Math.max(1.0, (i + 1) / (double) h)));
             a.futureUpper[i] = a.futureRate[i] + 1.645 * sdH * widen;
@@ -421,7 +457,10 @@ public final class Workload {
             a.futureSpike[i] = a.futureRate[i] > a.futureThreshold;
         }
         if (fut < p.futureBuckets)
-            a.summary.put("note", "Forecast horizon shortened to " + fut + " buckets: it cannot be longer than the uploaded history.");
+            notes.add("The forecast horizon was shortened to " + fut * p.bucketMin / 60.0 + " hours: it cannot be longer than the uploaded history.");
+        if (errs.size() < MIN_ERRORS)
+            notes.add("Too few past forecasts to estimate an error band, so no warnings are issued and the upper bound equals the forecast.");
+        if (!notes.isEmpty()) a.summary.put("note", String.join(" ", notes));
 
         Map<String, Object> s = a.summary;
         s.put("minutes", perMinute.length);
@@ -431,6 +470,8 @@ public final class Workload {
         s.put("bucket_minutes", p.bucketMin);
         s.put("model", a.model.describe());
         s.put("forecast_lead_minutes", h * p.bucketMin);
+        s.put("spike_window_minutes", W * p.bucketMin);
+        s.put("burst_buckets_cleaned", cleaned);
         s.put("mae_model", round(mae(x, a.fcHstep, warmup), 3));
         s.put("mae_naive_last_value", round(mae(x, naive, warmup), 3));
         if (season > 0) s.put("mae_seasonal_naive", round(mae(x, snaive, warmup), 3));
@@ -474,6 +515,26 @@ public final class Workload {
         double s = 0;
         for (int i = from; i < to; i++) s += x[i];
         return to > from ? s / (to - from) : 0;
+    }
+
+    static final int MAX_BURST_MINUTES = 60, MIN_ERRORS = 5;
+
+    /** 1.4826 x median absolute deviation: a standard deviation estimate that one burst cannot inflate. */
+    static double robustStd(List<Double> v) {
+        double[] a = new double[v.size()];
+        for (int i = 0; i < a.length; i++) a[i] = v.get(i);
+        double med = median(a);
+        double[] dev = new double[a.length];
+        for (int i = 0; i < a.length; i++) dev[i] = Math.abs(a[i] - med);
+        double mad = 1.4826 * median(dev);
+        return mad > 0 ? mad : std(v);
+    }
+
+    static double median(double[] a) {
+        double[] b = a.clone();
+        Arrays.sort(b);
+        int m = b.length / 2;
+        return b.length % 2 == 1 ? b[m] : (b[m - 1] + b[m]) / 2;
     }
 
     static double std(List<Double> v) {

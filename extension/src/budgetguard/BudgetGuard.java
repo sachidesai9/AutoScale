@@ -605,6 +605,59 @@ public final class BudgetGuard {
         System.out.println("Samples written to " + out.toAbsolutePath());
     }
 
+    /** Lists or deletes runs and workloads in the dashboard database (DATA_DIR, or DATABASE_URL for PostgreSQL). */
+    static void history(String[] a, Map<String, String> o) throws Exception {
+        String sub = a.length > 1 ? a[1] : "list";
+        String arg = a.length > 2 && !a[2].startsWith("--") ? a[2] : null;
+        Path dataDir = Paths.get(o.getOrDefault("data-dir", System.getenv().getOrDefault("DATA_DIR", "data")));
+        try (Store store = Store.open(dataDir)) {
+            switch (sub) {
+                case "list":
+                    System.out.println("Workloads (" + store.count("workloads") + "):");
+                    for (Map<String, Object> w : store.listWorkloads())
+                        System.out.println("  " + w.get("id") + "  " + w.get("uploaded_at") + "  " + w.get("name"));
+                    System.out.println("Runs (" + store.count("runs") + "):");
+                    for (Map<String, Object> r : store.listRuns(500))
+                        System.out.println("  " + r.get("id") + "  " + r.get("created_at") + "  " + r.get("kind") + "  " + r.get("status") + "  " + r.get("params"));
+                    break;
+                case "delete-workload":
+                    if (arg == null) throw new IllegalArgumentException("history delete-workload <id>");
+                    System.out.println(store.deleteWorkload(arg) ? "Deleted workload " + arg : "No workload " + arg);
+                    break;
+                case "delete-workloads": {
+                    String prefix = o.get("name-prefix");
+                    if (prefix == null || prefix.isEmpty()) throw new IllegalArgumentException("history delete-workloads --name-prefix <text>");
+                    int n = 0;
+                    for (Map<String, Object> w : store.listWorkloads())
+                        if (String.valueOf(w.get("name")).startsWith(prefix) && store.deleteWorkload((String) w.get("id"))) n++;
+                    System.out.println("Deleted " + n + " workload(s) whose name starts with '" + prefix + "'");
+                    break;
+                }
+                case "delete-run":
+                    if (arg == null) throw new IllegalArgumentException("history delete-run <id>");
+                    deleteRunFiles(store, arg, dataDir);
+                    break;
+                case "clear-runs":
+                    for (Map<String, Object> r : store.listRuns(500)) deleteRunFiles(store, (String) r.get("id"), dataDir);
+                    break;
+                default:
+                    throw new IllegalArgumentException("history list | delete-run <id> | delete-workload <id> | delete-workloads --name-prefix <text> | clear-runs");
+            }
+        }
+    }
+
+    static void deleteRunFiles(Store store, String id, Path dataDir) throws Exception {
+        String dir = store.deleteRun(id);
+        if (dir == null) { System.out.println("No run " + id); return; }
+        Path results = dataDir.resolve("results").toAbsolutePath().normalize();
+        // only ever delete inside this database's own results folder
+        if (!dir.isEmpty() && Paths.get(dir).toAbsolutePath().normalize().startsWith(results) && Files.isDirectory(Paths.get(dir)))
+            try (java.util.stream.Stream<Path> w = Files.walk(Paths.get(dir))) {
+                w.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+            }
+        System.out.println("Deleted run " + id);
+    }
+
     static void linkOrCopy(Path src, Path dst) throws IOException {
         if (Files.exists(dst)) return;
         if (!Files.exists(src)) throw new FileNotFoundException("Dataset not found: " + src.toAbsolutePath());
@@ -1090,6 +1143,9 @@ public final class BudgetGuard {
                         findDataDir(o), Paths.get(o.getOrDefault("out", "results/sweep_" + stamp)), System.out);
                 break;
             }
+            case "history":
+                history(a, o);
+                break;
             case "evaluate":
                 Evaluate.run(findDataDir(o), Paths.get(o.getOrDefault("out", "docs/results")), System.out);
                 break;
@@ -1125,6 +1181,8 @@ public final class BudgetGuard {
                         + "  analyse  --csv file.csv [--k 2.5]                   forecast and spike analysis\n"
                         + "  simulate --csv file.csv [--guard] [--budget-inr N]  replay a workload in AutoScaleSim\n"
                         + "  evaluate [--out docs/results]                       run every experiment in the report\n"
+                        + "  history  list | delete-run <id> | delete-workload <id> | delete-workloads --name-prefix qa_ | clear-runs\n"
+                        + "           [--data-dir data]                          housekeeping of the dashboard database\n"
                         + "  run      --mode original|observe|guard              one simulation (internal)");
         }
     }

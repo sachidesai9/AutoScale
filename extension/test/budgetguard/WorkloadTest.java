@@ -142,4 +142,56 @@ class WorkloadTest {
         q.targetUtil = 2;
         assertThrows(IllegalArgumentException.class, q::validate);
     }
+
+    static double[] flatWithBurst(int minutes, int burstStart, int burstLen, double burst) {
+        double[] v = new double[minutes];
+        for (int i = 0; i < minutes; i++) v[i] = Math.round(30 + 5 * Math.sin(i / 20.0));
+        for (int i = burstStart; i < burstStart + burstLen; i++) v[i] = burst;
+        return v;
+    }
+
+    @Test void shortUploadsAreAnalysed() {
+        double[] v = new double[Workload.MIN_MINUTES];
+        for (int i = 0; i < v.length; i++) v[i] = 20 + i % 7;
+        Workload.Analysis a = Workload.parse("x", perMinuteCsv(v)).analyse(new Workload.Params());
+        assertTrue(String.valueOf(a.summary.get("note")).contains("spike window was reduced"), String.valueOf(a.summary.get("note")));
+    }
+
+    @Test void longLeadIsReducedNotRejectedOnShortFiles() {
+        Workload.Params p = new Workload.Params();
+        p.leadBuckets = 6;                                            // 60 minutes on a 3-hour file
+        Workload.Analysis a = Workload.parse("x", perMinuteCsv(flatWithBurst(180, 0, 0, 0))).analyse(p);
+        assertTrue((Integer) a.summary.get("forecast_lead_minutes") <= 60);
+        p.leadBuckets = 12;                                           // 120 minutes cannot fit: reduced, with a note
+        Workload.Analysis b = Workload.parse("x", perMinuteCsv(flatWithBurst(180, 0, 0, 0))).analyse(p);
+        assertTrue((Integer) b.summary.get("forecast_lead_minutes") < 120);
+        assertTrue(String.valueOf(b.summary.get("note")).contains("warning lead was reduced"));
+    }
+
+    @Test void oneOffBurstDoesNotCreateFutureSpikes() {
+        Workload.Analysis a = Workload.parse("x", perMinuteCsv(flatWithBurst(360, 300, 10, 180))).analyse(new Workload.Params());
+        assertEquals(0, a.summary.get("future_spike_buckets"));
+        assertTrue((Integer) a.summary.get("future_max_required_vms") <= 3, "baseline 30 req/min needs 2-3 VMs, not the burst's 9");
+        assertTrue((Integer) a.summary.get("burst_buckets_cleaned") >= 1);
+    }
+
+    @Test void oneOffBurstOnMultiDayDataIsNotRepeatedNextDay() {
+        double[] v = daily(3);
+        for (int i = 2 * 1440 + 600; i < 2 * 1440 + 640; i++) v[i] = v[i] * 4;   // 40-minute burst on day 3
+        Workload.Analysis a = Workload.parse("x", perMinuteCsv(v)).analyse(new Workload.Params());
+        assertEquals(0, a.summary.get("future_spike_buckets"), "the burst must not come back at the same time tomorrow");
+    }
+
+    @Test void sustainedIncreaseIsFollowed() {
+        double[] v = flatWithBurst(720, 0, 0, 0);
+        for (int i = 480; i < 720; i++) v[i] += 30;                     // traffic doubles for the last 4 hours
+        Workload.Analysis a = Workload.parse("x", perMinuteCsv(v)).analyse(new Workload.Params());
+        assertTrue(a.futureRate[0] > 45, "forecast should follow the new level, got " + a.futureRate[0]);
+    }
+
+    @Test void flatTrafficHasNoFutureSpikes() {
+        double[] v = new double[240];
+        for (int i = 0; i < v.length; i++) v[i] = 20 + i % 7;
+        assertEquals(0, Workload.parse("x", perMinuteCsv(v)).analyse(new Workload.Params()).summary.get("future_spike_buckets"));
+    }
 }

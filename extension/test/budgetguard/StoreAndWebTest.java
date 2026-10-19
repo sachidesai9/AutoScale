@@ -163,4 +163,30 @@ class StoreAndWebTest {
         assumeTrue(Files.isDirectory(Paths.get("samples")), "samples folder not present");
         assertTrue(ws.stream().anyMatch(w -> String.valueOf(w.get("name")).startsWith("sample: ")));
     }
+
+    @Test void duplicateSubmissionReturnsTheSameRun() throws Exception {
+        String body = "kind=reproduce&scenario=nasa";
+        HttpResponse<String> first = post("/api/runs", body, "application/x-www-form-urlencoded");
+        HttpResponse<String> second = post("/api/runs", body, "application/x-www-form-urlencoded");
+        assertEquals(202, first.statusCode(), first.body());
+        String id1 = first.body().replaceAll(".*\"id\":\"([^\"]+)\".*", "$1"), id2 = second.body().replaceAll(".*\"id\":\"([^\"]+)\".*", "$1");
+        assertEquals(id1, id2, "a double-click must not start two simulations");
+        assertTrue(second.body().contains("duplicate"));
+    }
+
+    @Test void historyCommandDeletesOnlyInsideItsOwnResultsFolder() throws Exception {
+        Path data = Files.createTempDirectory("hist-data"), outside = Files.createTempDirectory("hist-outside");
+        Path inside = data.resolve("results").resolve("r1");
+        Files.createDirectories(inside);
+        Files.write(inside.resolve("x.txt"), "x".getBytes());
+        Files.write(outside.resolve("keep.txt"), "keep".getBytes());
+        try (Store s = Store.open(data)) {
+            s.createRun("r1", "compare", "{}", null); s.finishRun("r1", "{}", inside.toString());
+            s.createRun("r2", "compare", "{}", null); s.finishRun("r2", "{}", outside.toString());
+        }
+        BudgetGuard.history(new String[]{"history", "clear-runs"}, java.util.Map.of("data-dir", data.toString()));
+        assertFalse(Files.exists(inside), "run folder inside DATA_DIR/results is removed");
+        assertTrue(Files.exists(outside.resolve("keep.txt")), "a folder outside DATA_DIR/results is never deleted");
+        try (Store s = Store.open(data)) { assertEquals(0, s.count("runs")); }
+    }
 }

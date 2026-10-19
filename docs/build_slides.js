@@ -98,7 +98,7 @@ text(s, [
   { text: '2. Budget guard, explanations, conflict warnings', options: { bullet: true, breakLine: true } },
   { text: '3. Workload upload, forecast, spike warnings, capacity & cost', options: { bullet: true, breakLine: true } },
   { text: 'Dashboard, API, SQLite/PostgreSQL, Docker, AWS', options: { bullet: true, breakLine: true } },
-  { text: '46 JUnit tests, evaluation command', options: { bullet: true } }], { x: 7.1, y: 2.35, w: 5.3, h: 3.6, fontSize: 16, paraSpaceAfter: 10 });
+  { text: '54 JUnit tests, evaluation command', options: { bullet: true } }], { x: 7.1, y: 2.35, w: 5.3, h: 3.6, fontSize: 16, paraSpaceAfter: 10 });
 text(s, 'Not claimed as novel research: cost-aware scaling, explainability and forecasting all exist in the literature. New relative to the AutoScaleSim code base.', { x: 0.6, y: 6.55, w: 12.1, h: 0.5, fontSize: 13, color: INK2, italic: true });
 s.addNotes('This separation was a hard rule. The authors\' sources are untouched, and every result is labelled: original, original analysed by my extension, or budget-guarded. I am also careful not to claim novelty: budget-aware scaling and forecasting are studied in the literature; what is new is integrating them with this simulator.');
 
@@ -191,10 +191,10 @@ s.addChart(pres.charts.BAR, [
   { name: 'Same time yesterday', labels: flabels, values: f30.map((r) => +r[5]) }],
   { x: 0.5, y: 1.4, w: 7.4, h: 4.6, barDir: 'col', chartColors: [GREEN, BLUE, GREY], barGapWidthPct: 60, showLegend: true, legendPos: 'b',
     showTitle: true, title: '30-min-ahead MAE (requests/min, lower is better)', valAxisMinVal: 0, ...chartText });
-stat(s, 8.3, 1.5, 4.4, '0.43–0.58', 'recall: share of real spikes warned 10–60 min ahead (NASA weeks 2–4)', GREEN);
-stat(s, 8.3, 3.25, 4.4, '0.10–0.21', 'precision: most warnings are false alarms', 'C62828');
+stat(s, 8.3, 1.5, 4.4, '0.37–0.58', 'recall: share of real spikes warned 10–60 min ahead (NASA weeks 2–4)', GREEN);
+stat(s, 8.3, 3.25, 4.4, '0.11–0.21', 'precision: most warnings are false alarms', 'C62828');
 stat(s, 8.3, 5.0, 4.4, '±2 VMs', 'estimated vs simulated peak fleet (cost 6–15 % low)', NAVY);
-s.addNotes('Forecast accuracy: Holt-Winters is far better than same-time-yesterday, and slightly better than last-value on two of the three real weeks at thirty minutes, roughly equal on the third. Spike warnings catch about half the spikes but with many false alarms, and a sudden synthetic flash crowd is mostly unpredictable thirty minutes ahead. Capacity estimates land within two VMs of what the simulator used. So: useful for planning, not a reliable spike oracle.');
+s.addNotes('Forecast accuracy: Holt-Winters is far better than same-time-yesterday, and better than last-value at thirty and sixty minutes on all three real weeks. The fit is burst-robust: a one-off spike of up to an hour is kept out of the trend and the daily season, so it is not predicted again tomorrow; an earlier version without this flagged every future bucket as a spike after a single burst. Spike warnings catch roughly 40 to 60 percent of real spikes with many false alarms, and a sudden synthetic flash crowd is mostly unpredictable thirty minutes ahead. Capacity estimates land within two VMs of what the simulator used. So: useful for planning, not a reliable spike oracle.');
 
 // 11 Architecture & deployment
 pres.addSection({ title: 'System' });
@@ -210,7 +210,7 @@ s.addNotes('Everything ships as one Docker container. The dashboard calls a Java
 
 // 12 Testing
 s = content('Verified: tests, browser walk-through, container', 'System');
-stat(s, 0.6, 1.5, 3.8, '46 / 46', 'JUnit 5 tests passed (0 skipped)', GREEN);
+stat(s, 0.6, 1.5, 3.8, '54 / 54', 'JUnit 5 tests passed (0 skipped)', GREEN);
 stat(s, 4.7, 1.5, 3.8, '8', 'integration tests that run real simulations', NAVY);
 stat(s, 8.8, 1.5, 3.9, '0', 'JavaScript errors in the browser walk-through', NAVY);
 card(s, 0.6, 3.7, 12.1, 2.15);

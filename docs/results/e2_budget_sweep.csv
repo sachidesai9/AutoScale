@@ -1,0 +1,13 @@
+run,budget_inr,renting_cost_inr,within_budget,total_cost_inr,avg_response_time_s,meets_rt_target,sla_violation_pct,max_vms,vms_provisioned,contradictory_decisions,decisions_OK,decisions_PERF_MISS,decisions_BUDGET_HOLD,decisions_CONFLICT,decisions_BUDGET_RECOVERY,decisions_INFEASIBLE
+original,-,2536.40,-,3491.80,3.986,true,29.617,8,306,279,-,-,-,-,-,-
+guard,500,578.00,false,14235.80,25.898,false,98.594,2,0,0,0,0,0,0,1,1007
+guard,750,748.00,true,13542.20,23.777,false,95.898,2,207,125,27,206,14,682,50,29
+guard,1000,996.20,true,12454.20,20.411,false,91.519,2,215,138,66,213,51,607,60,11
+guard,1250,1247.80,true,10869.80,16.238,false,85.012,3,194,178,154,156,56,543,94,5
+guard,1500,1499.40,true,9982.40,13.924,false,79.305,4,241,196,249,194,50,414,99,2
+guard,1750,1747.60,true,7847.20,10.062,false,67.037,5,197,175,416,137,81,328,44,2
+guard,2000,1995.80,true,7296.40,8.903,false,60.371,5,272,233,514,188,45,209,52,0
+guard,2250,2247.40,true,5293.80,6.156,false,45.909,6,274,249,687,159,28,115,17,2
+guard,2500,2495.60,true,3709.40,4.292,false,31.901,8,306,280,818,164,5,12,9,0
+guard,2750,2536.40,true,3491.80,3.986,true,29.617,8,306,279,847,161,0,0,0,0
+guard,3000,2536.40,true,3491.80,3.986,true,29.617,8,306,279,847,161,0,0,0,0

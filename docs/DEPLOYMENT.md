@@ -88,6 +88,22 @@ deploy/aws/deploy.sh https://github.com/sachidesai9/autoscale.git main ap-southe
 2. In the dashboard: **1 · Reproduction → Run simulation** finishes in about 10–20 s and shows "Reproduced exactly".
 3. **History** lists the run. Reboot the instance (EC2 → Instance state → Reboot); the run is still listed, because data lives on the Docker volume.
 
+## Update the running server and clean its history (from CloudShell)
+
+`deploy/aws/server.sh` talks to the instance through AWS Systems Manager, with no SSH and no keys. In CloudShell (region Sydney):
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/sachidesai9/autoscale/main/deploy/aws/server.sh
+bash server.sh update                                   # pull latest main, rebuild, restart; data is kept
+bash server.sh history list                             # what is in the database
+bash server.sh history delete-workloads --name-prefix qa_   # remove test uploads named qa_...
+bash server.sh history delete-run <id>                  # remove one run (and its result files)
+bash server.sh history clear-runs                       # remove all runs before the demo (workloads stay)
+bash server.sh logs                                     # recent application log
+```
+
+Add `DRY_RUN=1` in front of a command to see exactly what would run, without changing anything. If you delete every workload, the three sample workloads are added again at the next restart (`bash server.sh update`).
+
 ## Logs and troubleshooting
 
 Open EC2 → select the instance → **Connect → Session Manager → Connect**, then:

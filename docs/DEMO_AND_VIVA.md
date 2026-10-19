@@ -3,10 +3,11 @@
 ## Before you present (10 minutes earlier)
 
 1. Open the deployed website (or run `scripts\start.bat` on your laptop as a backup) and check `…/api/health` shows `"status":"ok"`.
-2. Run one **Reproduction** once so the Overview shows "Reproduction check: identical ✓".
-3. Keep `samples\synthetic_flash_crowd_3days.csv` ready to upload.
-4. Open `docs/AutoScaleSim_Lab_Presentation.pptx`. Speaker notes are under each slide.
-5. Backup: if the internet fails, use the laptop (`scripts\start.bat`, <http://localhost:8080>). If Java fails too, show the screenshots in `docs/screenshots/`.
+2. Clean test data in AWS CloudShell: `bash server.sh history clear-runs` and `bash server.sh history delete-workloads --name-prefix qa_` (see docs/DEPLOYMENT.md).
+3. Run one **Reproduction** so the Overview shows "Reproduction check: identical ✓".
+4. Keep `samples\synthetic_flash_crowd_3days.csv` ready to upload.
+5. Open `docs/AutoScaleSim_Lab_Presentation.pptx`. Speaker notes are under each slide.
+6. Backup: if the internet fails, use the laptop (`scripts\start.bat`, <http://localhost:8080>). If Java fails too, show the screenshots in `docs/screenshots/`.
 
 ## Live demo (about 6 minutes)
 
@@ -19,7 +20,7 @@
 | 5 | Charts | "Orange cost follows the dashed paced-budget line; blue (original) goes above it. Response time is the price we pay." |
 | 6 | Explanations table, filter **CONFLICT**, read one row | "Every decision has a reason built from the actual numbers: delay, cost, allowance, target." |
 | 7 | **3 · Workloads → Upload** the flash-crowd CSV | "I can upload my own traffic. It is validated and stored in the database." |
-| 8 | Point to the history chart | "Blue is demand, green is the 30-minute-ahead forecast, red dots are spikes, yellow triangles are warnings. The KPI tiles show the honest backtest: recall 0.22 on this sudden synthetic spike, so sudden crowds are hard to predict." |
+| 8 | Point to the history chart | "Blue is demand, green is the 30-minute-ahead forecast, red dots are spikes, yellow triangles are warnings. The KPI tiles show the honest backtest: on this sudden synthetic spike the 30-minute recall is only 0.11, so sudden crowds are hard to predict, and the one-off spike does not inflate tomorrow's forecast." |
 | 9 | Future chart and VMs chart | "Next 24 hours: forecast, upper bound and the VMs needed at 70 % CPU, with an estimated cost in rupees." |
 | 10 | Tick **also run the budget guard**, budget 600 → **Run simulation** | "The same workload replayed in the unmodified simulator, with and without my guard." |
 | 11 | **History** | "All runs and uploads come from the database, and each can be reopened." |
@@ -72,11 +73,14 @@ Even the minimum fleet (1 VM) costs more than the budget allows, so no configura
 **How are explanations generated? Is it AI?**
 No. They are built from the numbers recorded at each decision (delay, response time, cost, allowance, target) using fixed, documented rules, so they are always true to the data.
 
+**What happens if there was one short spike in the past?**
+A burst of up to an hour is treated as a one-off: it is kept out of the trend and the daily season, so the forecast does not predict it again tomorrow or keep asking for extra VMs. Longer increases are kept, because they are real changes in demand. A test checks both cases.
+
 **Which forecasting method did you use and why?**
 Holt-Winters exponential smoothing with a daily season and damped trend, on 10-minute buckets. It is fast, well established and easy to explain. I compared it with two simple baselines.
 
 **Is your forecast good?**
-It is much better than "same time yesterday" and slightly better than "last value" at 20–60-minute leads on two of the three real weeks (about equal on the third). Spike warnings catch about half of the real spikes, with many false alarms. So it is useful for planning, not a perfect predictor.
+It is much better than "same time yesterday", and better than "last value" at 30- and 60-minute leads on all three real weeks (about equal at 10 minutes). Spike warnings catch 37–58 % of real spikes, with many false alarms. So it is useful for planning, not a perfect predictor.
 
 **How does an uploaded CSV run in the original simulator?**
 I convert it into the exact file format of the NASA trace, so the original emulator replays it unchanged. Arrival seconds inside each minute are drawn randomly with a fixed seed, matching the real trace.
@@ -94,7 +98,7 @@ The dashboard runs in a Docker container on an AWS EC2 instance created by a Clo
 The original code keeps static state and reads and writes a relative folder, so two runs in one JVM would interfere. Separate processes keep each run clean, and a queue runs them one at a time.
 
 **How did you test it?**
-46 JUnit 5 tests: unit tests of every decision branch and of the billing rule, database tests on SQLite and PostgreSQL, API tests including bad inputs, and 8 integration tests that run real simulations. I also ran a browser walk-through of every feature and checked the Docker container's health.
+54 JUnit 5 tests: unit tests of every decision branch and of the billing rule, database tests on SQLite and PostgreSQL, API tests including bad inputs, and 8 integration tests that run real simulations. I also ran a browser walk-through of every feature and checked the Docker container's health.
 
 **What would you do next?**
 Compare against the paper's tables, use the forecast to save budget for predicted peaks, try learning-based predictors, and add HTTPS and login for a production deployment.

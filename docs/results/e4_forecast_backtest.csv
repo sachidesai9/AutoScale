@@ -1,0 +1,17 @@
+workload,lead_min,model,mae_model,mae_last_value,mae_seasonal_naive,spikes,warnings,precision,recall
+NASA week 2 (real),10,"Holt-Winters additive, damped trend, burst-robust (alpha=0.40, beta=0.02, gamma=0.15, phi=0.98, rho=1.0, season=144 buckets)",9.487,9.855,24.104,30,60,0.2,0.4
+NASA week 2 (real),20,same family,10.561,11.1,24.137,30,77,0.169,0.433
+NASA week 2 (real),30,same family,11.424,12.09,24.164,30,86,0.163,0.467
+NASA week 2 (real),60,same family,13.455,14.213,24.236,30,100,0.11,0.367
+NASA week 3 (real),10,"Holt-Winters additive, damped trend, burst-robust (alpha=0.40, beta=0.00, gamma=0.30, phi=0.98, rho=1.0, season=144 buckets)",7.983,7.867,13.69,35,94,0.213,0.571
+NASA week 3 (real),20,same family,8.966,9.252,13.707,35,101,0.158,0.457
+NASA week 3 (real),30,same family,9.609,10.127,13.726,35,106,0.132,0.4
+NASA week 3 (real),60,same family,11.107,12.205,13.766,35,128,0.125,0.457
+NASA week 4 (real),10,"Holt-Winters additive, damped trend, burst-robust (alpha=0.40, beta=0.00, gamma=0.30, phi=0.98, rho=1.0, season=144 buckets)",7.318,7.301,15.775,31,142,0.12,0.548
+NASA week 4 (real),20,same family,7.932,7.928,15.781,31,155,0.11,0.548
+NASA week 4 (real),30,same family,8.341,8.543,15.79,31,149,0.114,0.548
+NASA week 4 (real),60,same family,9.89,10.2,15.843,31,169,0.107,0.581
+flash crowd (synthetic),10,"Holt-Winters additive, damped trend, burst-robust (alpha=0.80, beta=0.00, gamma=0.30, phi=0.98, rho=1.0, season=144 buckets)",10.755,9.747,31.757,9,30,0.167,0.556
+flash crowd (synthetic),20,same family,13.137,13.713,31.978,9,15,0.067,0.111
+flash crowd (synthetic),30,same family,13.469,17.162,32.174,9,19,0.053,0.111
+flash crowd (synthetic),60,same family,15.206,19.009,32.719,9,33,0.091,0.333

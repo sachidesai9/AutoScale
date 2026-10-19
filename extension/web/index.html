@@ -126,7 +126,7 @@
 <!-- ============================== WORKLOAD ============================== -->
 <section class="page" id="page-workload">
   <h2>3 · Custom workloads and predictive spike warnings</h2>
-  <p class="lead">Upload per-minute request counts (<code>minute,requests</code>) or a request log (<code>timestamp</code> column). The forecast is Holt-Winters exponential smoothing with a daily season, chosen by grid search; spikes are buckets above the trailing 2-hour mean + k·σ; warnings fire when the forecast's upper bound crosses that threshold ahead of time.</p>
+  <p class="lead">Upload per-minute request counts (<code>minute,requests</code>) or a request log (<code>timestamp</code> column). The forecast is Holt-Winters exponential smoothing with a daily season, chosen by grid search; spikes are buckets above the trailing 2-hour mean + k·σ; warnings fire when the forecast's upper bound crosses that threshold ahead of time. One-off bursts of up to an hour are kept out of the trend and daily season, so a single spike is not predicted again.</p>
   <div class="grid two">
     <div class="card">
       <h3>Upload a workload CSV</h3>

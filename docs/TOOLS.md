@@ -13,7 +13,7 @@
 | Database | SQLite (sqlite-jdbc 3.46) / PostgreSQL (JDBC 42.7, server 16) | — | Runs, metrics, uploaded workloads |
 | Web server / API | JDK `HttpServer` | built in | Dashboard and JSON API without extra frameworks |
 | Frontend | HTML, CSS, JavaScript, Chart.js | 4.4.6 | Interactive dashboard and charts |
-| Testing | JUnit 5 (Platform Console Standalone) | 1.11.3 | 46 unit, API, database and integration tests |
+| Testing | JUnit 5 (Platform Console Standalone) | 1.11.3 | 54 unit, API, database and integration tests |
 | UI testing | Playwright (Chromium) | — | End-to-end browser walk-through and screenshots |
 | Packaging | Docker, Docker Compose | — | Container image with health check |
 | Cloud | AWS EC2, CloudFormation, IAM, Systems Manager | — | Public deployment, infrastructure as code, logs |

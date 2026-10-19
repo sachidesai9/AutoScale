@@ -1,0 +1,7 @@
+replay,response_time_avg_s,sla_violation_pct,max_vms,renting_cost_inr,total_requests
+authors' original run,3.986,29.617,8,2536.40,567783
+exact copy of the original rows,3.986,29.617,8,2536.40,567783
+"per-minute counts, random-uniform arrivals (seed 20210101)",5.1,34.912,7,2230.40,567783
+"per-minute counts, random-uniform arrivals (seed 1)",4.88,34.362,7,2244.00,567783
+"per-minute counts, random-uniform arrivals (seed 2)",5.224,34.313,7,2264.40,567783
+"per-minute counts, evenly spaced arrivals",14.702,63.028,6,1914.20,567783

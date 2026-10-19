@@ -1,0 +1,13 @@
+metric,nasa_original_main,wikipedia_documented_values
+total_requests,567783,1478947
+response_time_avg_s,3.986,0.312
+delay_time_avg_s,1.989,0.301
+sla_violation_pct,29.617,1.548
+cpu_util_avg_pct,35.799,1.042
+max_vms,8,8
+vms_provisioned,306,50
+contradictory_decisions,279,78
+cloudlets_failed,9264,770
+renting_cost_usd,29.84,1.02
+sla_penalty_usd,11.24,1.34
+total_cost_usd,41.08,2.36
